@@ -1,5 +1,7 @@
 HELP = (
-    '<tg-emoji emoji-id="5402227731972771532">🍺</tg-emoji> <b>Пивной бот</b>\n\n'
+    '<tg-emoji emoji-id="5402227731972771532">🍺</tg-emoji> <b>Привет! Я Пивной бот.</b>\n\n'
+    "\n"
+    "Команды:"
     "/beer — выпить пиво (раз в час).\n"
     "/stats — показать топ алкоголиков этого чата."
 )
@@ -24,7 +26,7 @@ COOLDOWN_EARLY = '<i>{name}, повтори через {minutes} мин. {second
 
 EMPTY_LEADERBOARD = '<tg-emoji emoji-id="5264737672684907396">🍻</tg-emoji> Пока никто в этом чате не пил пиво. Используйте /beer первым!'
 
-LEADERBOARD_TITLE = '<b><i><tg-emoji emoji-id="5409008750893734809">🏆</tg-emoji> Топ алкоголиков — страница</i></b> ({page}/{pages})\n'
+LEADERBOARD_TITLE = '<b><i><tg-emoji emoji-id="5409008750893734809">🏆</tg-emoji> Топ игроков чата — страница</i></b> ({page}/{pages}):\n'
 LEADERBOARD_ROW = "{number}. <i>{name} — <b>{liters} л.</b></i>"
 TEXT_INFO = "\n\n<i>Чтобы попасть в этот список, начните игру с помощью команды /beer</i>"
 
