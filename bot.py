@@ -227,12 +227,18 @@ async def command_beer(message: Message) -> None:
     success, value, total_liters = drink(message.chat.id, message.from_user.id, name)
     if not success:
         minutes, seconds = divmod(int(value), 60)
-        # ИСПРАВЛЕНО: Сюда добавлен аргумент name=name, чтобы не было ошибки KeyError
+        # Передаем все переменные, которые требует ваша строка COOLDOWN_EARLY
         await message.reply(
-            messages.COOLDOWN_EARLY.format(name=name, minutes=minutes, seconds=seconds), 
+            messages.COOLDOWN_EARLY.format(
+                name=name, 
+                minutes=minutes, 
+                seconds=seconds,
+                total_liters=format_liters(total_liters) # Добавили эту строку
+            ), 
             parse_mode="HTML"
         )
         return
+
     # Успешно выпил — показываем объём и время до следующей попытки
     minutes, seconds = divmod(COOLDOWN_SECONDS, 60)
     await message.reply(
