@@ -227,7 +227,11 @@ async def command_beer(message: Message) -> None:
     success, value, total_liters = drink(message.chat.id, message.from_user.id, name)
     if not success:
         minutes, seconds = divmod(int(value), 60)
-        await message.reply(messages.COOLDOWN_EARLY.format(minutes=minutes, seconds=seconds), parse_mode="HTML")
+        # ИСПРАВЛЕНО: Сюда добавлен аргумент name=name, чтобы не было ошибки KeyError
+        await message.reply(
+            messages.COOLDOWN_EARLY.format(name=name, minutes=minutes, seconds=seconds), 
+            parse_mode="HTML"
+        )
         return
     # Успешно выпил — показываем объём и время до следующей попытки
     minutes, seconds = divmod(COOLDOWN_SECONDS, 60)
@@ -241,7 +245,6 @@ async def command_beer(message: Message) -> None:
         ),
         parse_mode="HTML"
     )
-
 
 @router.message(Command("stats"))
 async def command_top(message: Message) -> None:
