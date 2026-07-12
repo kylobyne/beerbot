@@ -266,8 +266,11 @@ async def command_top(message: Message) -> None:
         for row in rows
     ]
     text, page, pages = leaderboard_text(rows, 0, pages)
+    
+    # Добавляем инфо-текст из вашего модуля messages в самый конец сообщения
+    text += f"{messages.TEXT_INFO}"
+    
     await message.answer(text, reply_markup=leaderboard_keyboard(page, pages), parse_mode="HTML")
-
 
 @router.callback_query(F.data.startswith("beer_top:"))
 async def leaderboard_pagination(callback: CallbackQuery) -> None:

@@ -21,11 +21,17 @@ DRINK_NEXT = (
 )
 
 COOLDOWN_EARLY = '<i>{name}, повтори через {minutes} мин. {seconds} сек. Выпито всего - {total_liters} л.</i>'
+
 EMPTY_LEADERBOARD = '<tg-emoji emoji-id="5264737672684907396">🍻</tg-emoji> Пока никто в этом чате не пил пиво. Используйте /beer первым!'
+
 LEADERBOARD_TITLE = '<b><i><tg-emoji emoji-id="5409008750893734809">🏆</tg-emoji> Топ алкоголиков — страница</i></b> ({page}/{pages})\n'
 LEADERBOARD_ROW = "{number}. <i>{name} — <b>{liters} л.</b></i>"
+TEXT_INFO = "\n\n<i>Чтобы попасть в этот список, начните игру с помощью команды /beer</i>"
+
 INVALID_PAGE = "Не удалось открыть страницу топа."
+
 PAGINATION_COOLDOWN = "Пожалуйста, подождите {seconds} сек."
+
 TOO_FAST = "Не так быстро!"
 
 RANK_EMOJIS = {
