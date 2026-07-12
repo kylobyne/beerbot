@@ -45,8 +45,6 @@ def get_connection(chat_id: int) -> sqlite3.Connection:
     connection = sqlite3.connect(database_path(chat_id))
     connection.row_factory = sqlite3.Row
 
-    # Создаём таблицу с хранением в литрах. При обнаружении старой колонки
-    # с миллилитрами выполняется перенос значений и удаление старой колонки.
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS drinkers (
@@ -58,45 +56,7 @@ def get_connection(chat_id: int) -> sqlite3.Connection:
         """
     )
 
-    # Миграция схемы: перенос значений в `total_liters` и перестройка таблицы без `total_ml`.
-    cur = connection.execute("PRAGMA table_info(drinkers)")
-    cols = [r[1] for r in cur.fetchall()]
-
-    # Если присутствует только старый столбец с миллилитрами, создаём столбец с литрами
-    # и заполняем его значениями.
-    if "total_ml" in cols and "total_liters" not in cols:
-        connection.execute("ALTER TABLE drinkers ADD COLUMN total_liters REAL NOT NULL DEFAULT 0")
-        connection.execute("UPDATE drinkers SET total_liters = total_ml / 1000.0 WHERE total_ml IS NOT NULL")
-        connection.commit()
-        # обновим список колонок
-        cur = connection.execute("PRAGMA table_info(drinkers)")
-        cols = [r[1] for r in cur.fetchall()]
-
-    # При наличии `total_ml` перестроим таблицу без этой колонки.
-    if "total_ml" in cols:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS drinkers_new (
-                user_id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                total_liters REAL NOT NULL DEFAULT 0,
-                last_drink INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
-        # Скопируем данные, используя total_liters если есть, иначе пересчитаем из total_ml
-        connection.execute(
-            """
-            INSERT OR REPLACE INTO drinkers_new (user_id, name, total_liters, last_drink)
-            SELECT user_id, name,
-                COALESCE(total_liters, (CASE WHEN total_ml IS NOT NULL THEN total_ml / 1000.0 ELSE 0 END)),
-                last_drink
-            FROM drinkers
-            """
-        )
-        connection.execute("DROP TABLE drinkers")
-        connection.execute("ALTER TABLE drinkers_new RENAME TO drinkers")
-        connection.commit()
+    connection.commit()
 
     return connection
 
