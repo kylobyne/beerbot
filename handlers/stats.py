@@ -55,57 +55,26 @@ def get_rank_emoji(rank:int):
 
 
 
-def leaderboard_text(
-    rows,
-    page,
-    pages
-):
-
+def leaderboard_text(rows, page, pages):
     if not rows:
+        return (messages.EMPTY_LEADERBOARD, page, pages)
 
-        return (
-            messages.EMPTY_LEADERBOARD,
-            page,
-            pages
-        )
-
-
-    lines = [
-        messages.LEADERBOARD_TITLE.format(
-            page=page+1,
-            pages=pages
-        )
-    ]
-
-
-
+    lines = [messages.LEADERBOARD_TITLE.format(page=page + 1, pages=pages)]
     start = page * ROWS_PER_PAGE
 
-
-    for number,row in enumerate(
-        rows,
-        start=start+1
-    ):
-
+    for number, row in enumerate(rows, start=start + 1):
         lines.append(
             messages.LEADERBOARD_ROW.format(
                 number=get_rank_emoji(number),
-                name=html.escape(
-                    row["name"]
-                ),
-                liters=format_liters(
-                    row["total_liters"]
-                )
+                name=html.escape(row["name"]),
+                liters=format_liters(row["total_liters"]),
             )
         )
 
+    # Объединяем строки таблицы и в конец добавляем TEXT_INFO
+    full_text = "\n".join(lines) + messages.TEXT_INFO
 
-    return (
-        "\n".join(lines),
-        page,
-        pages
-    )
-
+    return (full_text, page, pages)
 
 
 def leaderboard_keyboard(
@@ -190,9 +159,6 @@ async def command_stats(message:Message):
         0,
         pages
     )
-
-
-    text += messages.TEXT_INFO
 
 
 
