@@ -191,6 +191,18 @@ async def leaderboard_pagination(
 
 
 
+    value = callback.data.split(":")[1]
+
+
+
+    if value=="current":
+
+        await callback.answer()
+
+        return
+
+
+
     now=time.time()
 
 
@@ -212,18 +224,6 @@ async def leaderboard_pagination(
 
 
     _pagination_last[chat_id]=now
-
-
-
-    value = callback.data.split(":")[1]
-
-
-
-    if value=="current":
-
-        await callback.answer()
-
-        return
 
 
 
