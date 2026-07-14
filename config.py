@@ -13,8 +13,9 @@ if not TOKEN:
     raise RuntimeError("Задайте BOT_TOKEN в файле .env")
 
 
-
-COOLDOWN_SECONDS = 60 * 60
+# config.py
+COOLDOWN_TIME = 5  # Время ограничения в секундах
+COOLDOWN_SECONDS = 3600
 ROWS_PER_PAGE = 20
 PAGINATION_COOLDOWN_SECONDS = 3
 

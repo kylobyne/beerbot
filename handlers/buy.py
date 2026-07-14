@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-from config import BUY_OPTIONS, INVOICE_LIFETIME
+from config import BUY_OPTIONS, INVOICE_LIFETIME # Здесь COOLDOWN_TIME больше не нужен, он внутри Middleware.py
 from database import (
     add_paid_attempts, 
     get_paid_attempts, 
@@ -17,10 +17,12 @@ from database import (
     mark_invoice_as_paid
 )
 import messages
+# Импортируем ваш созданный класс из соседнего файла Middleware.py
+from handlers.Middleware import CooldownMiddleware 
 
 router = Router()
-
-# Срок действия инвойса в секундах (10 минут = 600 секунд)
+# Теперь эта строка отработает без ошибок:
+router.callback_query.middleware(CooldownMiddleware())
 
 
 @router.message(Command("buy"))

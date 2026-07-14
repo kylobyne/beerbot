@@ -23,9 +23,12 @@ from config import (
     PAGINATION_COOLDOWN_SECONDS,
     ALLOWED_STATUSES
 )
+from handlers.Middleware import CooldownMiddleware # Импортируем middleware
 
+# Создаем роутер ОДИН раз
 router = Router()
-_pagination_last = {}
+# Подключаем к нему middleware
+router.callback_query.middleware(CooldownMiddleware()) 
 
 
 def format_liters(value: float):
@@ -179,17 +182,7 @@ async def leaderboard_pagination(callback: CallbackQuery):
         await callback.answer("Вы на этой странице", show_alert=False)
         return
 
-    now = time.time()
-    last = _pagination_last.get(chat_id, 0)
-
-    if now - last < PAGINATION_COOLDOWN_SECONDS:
-        await callback.answer(
-            messages.TOO_FAST,
-            show_alert=True
-        )
-        return
-
-    _pagination_last[chat_id] = now
+    # --- ВСЯ СТАРАЯ ПРОВЕРКА ВРЕМЕНИ И СЛОВАРЬ УДАЛЕНЫ ОТСЮДА ---
 
     try:
         page = int(value)
