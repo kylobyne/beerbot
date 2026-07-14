@@ -8,6 +8,7 @@ from config import TOKEN
 from handlers import (
     start,
     beer,
+    buy,
     stats
 )
 
@@ -29,6 +30,7 @@ async def main():
 
     dp.include_router(start.router)
     dp.include_router(beer.router)
+    dp.include_router(buy.router)
     dp.include_router(stats.router)
 
 

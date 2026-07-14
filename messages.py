@@ -40,3 +40,13 @@ RANK_EMOJIS = {
     2: '<tg-emoji emoji-id="5447203607294265305">🥈</tg-emoji>',
     3: '<tg-emoji emoji-id="5453902265922376865">🥉</tg-emoji>'
 }
+
+BUY_SUCCESS = (
+    '<tg-emoji emoji-id="5264737672684907396">🍻</tg-emoji> <b>Успешная покупка!</b>\n'
+    "<i>Мы добавили ваши дополнительные попытки: {attempts}</i>"
+)
+
+BUY_MENU = (
+    '<tg-emoji emoji-id="5402227731972771532">🍺</tg-emoji> <b>Покупка дополнительных попыток</b>\n\n'
+    "Выберите количество:"
+)
