@@ -125,11 +125,6 @@ BUY_OPTIONS = {
 beer/
 │
 ├── bot.py                 # Запуск бота
-<<<<<<< HEAD
-├── options.py             # Игровые настройки и товары
-=======
-├── config.py              # Токен, настройки, пути
->>>>>>> 48ccbbbd70788af3c94182fea1e9c43f4b5dc46c
 ├── messages.py            # Все сообщения бота
 ├── database.py            # Работа с SQLite
 │
