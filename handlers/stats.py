@@ -20,7 +20,8 @@ from database import (
 )
 from config import (
     ROWS_PER_PAGE,
-    PAGINATION_COOLDOWN_SECONDS
+    PAGINATION_COOLDOWN_SECONDS,
+    ALLOWED_STATUSES
 )
 
 router = Router()
@@ -79,7 +80,6 @@ async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
     if not all_db_rows:
         return messages.EMPTY_LEADERBOARD, None
 
-    ALLOWED_STATUSES = ["creator", "administrator", "member"]
     valid_rows = []
 
     # Внутренняя функция для проверки статуса одного игрока

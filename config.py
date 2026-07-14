@@ -47,3 +47,5 @@ DB_CLEAN_INTERVAL = 3600
 
 # Время, через которое заброшенный инвойс удаляется из базы (30 минут = 1800 секунд)
 INVOICE_CLEAN_THRESHOLD = 1800
+
+ALLOWED_STATUSES = ["creator", "administrator", "member", "restricted"]
