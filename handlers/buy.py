@@ -18,28 +18,33 @@ router = Router()
 
 @router.message(Command("buy"))
 async def command_buy(message: Message):
-
     from aiogram.utils.keyboard import InlineKeyboardBuilder
-
 
     builder = InlineKeyboardBuilder()
 
-
     for key, item in BUY_OPTIONS.items():
+        # 1. По умолчанию текст стандартный
+        button_text = f"{item['attempts']} попыток - ⭐{item['stars']}"
+        
+        # 2. Меняем текст только для тарифа на 10 попыток
+        if item['attempts'] == 10:
+            button_text = f"🥇 {item['attempts']} попыток - ⭐{item['stars']}"
+            
+        # Можно добавить кастомный текст и для других кнопок
+        #elif item['attempts'] == 15:
+        #    button_text = f"💎 ВЫГОДНО! {item['attempts']} попыток - ⭐{item['stars']}"
 
         builder.button(
-            text=f"{item['attempts']} попыток - ⭐{item['stars']}",
+            text=button_text,
             callback_data=f"buy:{key}"
         )
 
-
     builder.adjust(1)
 
-
     await message.answer(
-    messages.BUY_MENU,
-    reply_markup=builder.as_markup(),
-    parse_mode="HTML"
+        messages.BUY_MENU,
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
 
 
