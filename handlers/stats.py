@@ -54,7 +54,7 @@ def leaderboard_keyboard(page, pages):
         builder.button(
             text="◀️",
             callback_data=f"beer_top:{page-1}",
-            style="primary"
+            style="success"
         )
 
     builder.button(
@@ -66,7 +66,7 @@ def leaderboard_keyboard(page, pages):
         builder.button(
             text="▶️",
             callback_data=f"beer_top:{page+1}",
-            style="primary"
+            style="success"
         )
 
     builder.adjust(3)
