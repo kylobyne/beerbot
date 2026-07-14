@@ -21,6 +21,7 @@ async def main():
         format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
 
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 
     bot = Bot(TOKEN)
 
