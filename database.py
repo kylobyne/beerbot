@@ -7,6 +7,7 @@ from config import (
     DATABASE_DIRECTORY,
     COOLDOWN_SECONDS,
     ROWS_PER_PAGE,
+    INVOICE_CLEAN_THRESHOLD,
 )
 
 
@@ -344,6 +345,23 @@ def mark_invoice_as_paid(invoice_id: str) -> bool:
 
 
         return cursor.rowcount > 0
+
+def delete_old_pending_invoices():
+    """Удаляет из базы все инвойсы в статусе 'pending', созданные ранее установленного порога."""
+    import time
+    
+    # Вычитаем порог времени из текущего Unix-timestamp
+    expire_time = int(time.time()) - INVOICE_CLEAN_THRESHOLD
+    
+    with get_paid_connection() as connection:
+        connection.execute(
+            """
+            DELETE FROM invoices 
+            WHERE status = 'pending' AND created_at < ?
+            """,
+            (expire_time,)
+        )
+        connection.commit()
 
 
 
