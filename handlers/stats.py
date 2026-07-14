@@ -1,6 +1,7 @@
 import html
 import time
 import math
+import asyncio
 
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -71,43 +72,56 @@ def leaderboard_keyboard(page, pages):
 
 async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
     """
-    Получает всех игроков из БД, асинхронно проверяет их наличие в чате,
+    Получает всех игроков из БД, асинхронно проверяет их статус в чате параллельными пачками,
     динамически нарезает на страницы и возвращает (текст, клавиатура).
     """
-    # 1. Получаем вообще всех участников из базы данных
     all_db_rows = get_leaderboard(chat_id)
     if not all_db_rows:
         return messages.EMPTY_LEADERBOARD, None
 
-    valid_rows = []
     ALLOWED_STATUSES = ["creator", "administrator", "member"]
+    valid_rows = []
 
-    # 2. Фильтруем только тех, кто реально состоит в чате
-    for row in all_db_rows:
+    # Внутренняя функция для проверки статуса одного игрока
+    async def check_member(row):
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=row["user_id"])
             if member.status in ALLOWED_STATUSES:
-                valid_rows.append(row)
+                return row
         except Exception:
-            # Игнорируем заблокированных или удаленных пользователей
-            continue
+            pass
+        return None
+
+    # Опрашиваем Telegram параллельными пачками (батчами) по 10 человек, чтобы не поймать FloodWait
+    BATCH_SIZE = 10
+    for i in range(0, len(all_db_rows), BATCH_SIZE):
+        batch = all_db_rows[i:i + BATCH_SIZE]
+        tasks = [check_member(row) for row in batch]
+        
+        # Выполняем 10 запросов одновременно
+        batch_results = await asyncio.gather(*tasks)
+        
+        # Отбираем «живых» пользователей
+        for res in batch_results:
+            if res is not None:
+                valid_rows.append(res)
 
     if not valid_rows:
         return messages.EMPTY_LEADERBOARD, None
 
-    # 3. Динамически рассчитываем реальное количество страниц по живым юзерам
+    # Динамически рассчитываем реальное количество страниц по отфильтрованным юзерам
     total_users = len(valid_rows)
     total_pages = math.ceil(total_users / ROWS_PER_PAGE)
 
-    # Защита от выхода за границы страниц, если кто-то ливнул
+    # Защита от выхода за границы страниц
     page = max(0, min(target_page, total_pages - 1))
 
-    # 4. Нарезаем массив "живых" пользователей строго под текущую страницу
+    # Нарезаем массив строго под текущую страницу
     start_index = page * ROWS_PER_PAGE
     end_index = start_index + ROWS_PER_PAGE
     page_rows = valid_rows[start_index:end_index]
 
-    # 5. Собираем текст сообщения
+    # Собираем текст сообщения
     lines = [messages.LEADERBOARD_TITLE.format(page=page + 1, pages=total_pages)]
 
     for number, row in enumerate(page_rows, start=start_index + 1):
@@ -141,7 +155,7 @@ async def command_stats(message: Message):
             message.from_user.full_name
         )
 
-    # Генерируем 1-ю страницу топа (индекс 0) с живыми участниками
+    # Генерируем 1-ю страницу топа (индекс 0)
     text, reply_markup = await get_valid_leaderboard_text(message.bot, message.chat.id, 0)
 
     await message.answer(
@@ -191,7 +205,7 @@ async def leaderboard_pagination(callback: CallbackQuery):
             callback.from_user.full_name
         )
 
-    # Генерируем запрошенную страницу с живыми участниками
+    # Генерируем запрошенную страницу
     text, reply_markup = await get_valid_leaderboard_text(callback.message.bot, chat_id, page)
 
     await callback.message.edit_text(
