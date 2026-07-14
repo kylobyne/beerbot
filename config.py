@@ -25,16 +25,16 @@ DATABASE_DIRECTORY.mkdir(exist_ok=True)
 BUY_OPTIONS = {
     "5": {
         "attempts": 5,
-        "stars": 30
+        "stars": 15
     },
 
     "10": {
         "attempts": 10,
-        "stars": 50
+        "stars": 20
     },
 
     "15": {
         "attempts": 15,
-        "stars": 70
+        "stars": 25
     }
 }

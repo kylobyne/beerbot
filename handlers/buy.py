@@ -1,4 +1,5 @@
 import messages
+import html
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import (
@@ -15,8 +16,6 @@ from database import add_paid_attempts, get_paid_attempts
 
 router = Router()
 
-
-
 @router.message(Command("buy"))
 async def command_buy(message: Message):
 
@@ -29,7 +28,7 @@ async def command_buy(message: Message):
     for key, item in BUY_OPTIONS.items():
 
         builder.button(
-            text=f"{item['attempts']} попыток ⭐{item['stars']}",
+            text=f"{item['attempts']} попыток - ⭐{item['stars']}",
             callback_data=f"buy:{key}"
         )
 
@@ -71,10 +70,10 @@ async def buy_callback(
 
 
     await callback.message.answer_invoice(
-        title="Дополнительные попытки",
+        title="Активации",
 
         description=(
-            f"{item['attempts']} дополнительных попыток"
+            f"Оплата {item['attempts']} активаций"
         ),
 
         payload=f"paid_attempts:{item['attempts']}",
@@ -117,7 +116,7 @@ async def process_pre_checkout(
 async def successful_payment(
     message: Message
 ):
-
+    name = message.from_user.full_name
     payload = (
         message.successful_payment.invoice_payload
     )
@@ -148,6 +147,7 @@ async def successful_payment(
 
     await message.answer(
         messages.BUY_SUCCESS.format(
+            name=html.escape(name),
             attempts=attempts,
             total_attempts=total_attempts
         ),
