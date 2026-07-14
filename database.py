@@ -241,6 +241,7 @@ def get_paid_connection():
     connection.row_factory = sqlite3.Row
 
 
+    # Таблица для хранения купленных попыток пользователей
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS paid_attempts
@@ -252,9 +253,97 @@ def get_paid_connection():
     )
 
 
+    # ТАБЛИЦА ИНВОЙСОВ: проверка уникальности чеков и времени создания
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS invoices
+        (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('pending', 'paid')),
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+
+
     connection.commit()
 
     return connection
+
+
+
+def create_invoice(
+    invoice_id: str,
+    user_id: int,
+    created_at: int
+):
+    """Создает запись инвойса со статусом ожидания оплаты."""
+    with get_paid_connection() as connection:
+
+        connection.execute(
+            """
+            INSERT INTO invoices (id, user_id, status, created_at)
+            VALUES (?, ?, 'pending', ?)
+            """,
+            (
+                invoice_id,
+                user_id,
+                created_at
+            )
+        )
+
+        connection.commit()
+
+
+
+def get_invoice_status(invoice_id: str):
+    """Возвращает текущий статус инвойса ('pending', 'paid') или None."""
+    with get_paid_connection() as connection:
+
+        row = connection.execute(
+            """
+            SELECT status 
+            FROM invoices 
+            WHERE id = ?
+            """,
+            (
+                invoice_id,
+            )
+        ).fetchone()
+
+
+        if not row:
+            return None
+
+
+        return row["status"]
+
+
+
+def mark_invoice_as_paid(invoice_id: str) -> bool:
+    """
+    Переводит инвойс в статус 'paid' строго из статуса 'pending'.
+    Защищает от состояния гонки и дублирующихся запросов Telegram.
+    Возвращает True, если статус изменен (успех), иначе False.
+    """
+    with get_paid_connection() as connection:
+
+        cursor = connection.execute(
+            """
+            UPDATE invoices 
+            SET status = 'paid' 
+            WHERE id = ? AND status = 'pending'
+            """,
+            (
+                invoice_id,
+            )
+        )
+
+        connection.commit()
+
+
+        return cursor.rowcount > 0
 
 
 

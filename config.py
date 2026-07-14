@@ -38,3 +38,6 @@ BUY_OPTIONS = {
         "stars": 25
     }
 }
+
+#Время жизни счета
+INVOICE_LIFETIME = 600
