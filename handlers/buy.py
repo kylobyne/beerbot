@@ -10,7 +10,7 @@ from aiogram.types import (
 
 from config import BUY_OPTIONS
 
-from database import add_paid_attempts
+from database import add_paid_attempts, get_paid_attempts
 
 
 router = Router()
@@ -141,9 +141,15 @@ async def successful_payment(
     )
 
 
+    total_attempts = get_paid_attempts(
+        message.from_user.id
+    )
+
+
     await message.answer(
-    messages.BUY_SUCCESS.format(
-        attempts=attempts
-    ),
-    parse_mode="HTML"
+        messages.BUY_SUCCESS.format(
+            attempts=attempts,
+            total_attempts=total_attempts
+        ),
+        parse_mode="HTML"
     )
