@@ -20,3 +20,21 @@ PAGINATION_COOLDOWN_SECONDS = 3
 
 DATABASE_DIRECTORY = Path("sqlite3")
 DATABASE_DIRECTORY.mkdir(exist_ok=True)
+
+# Товары
+BUY_OPTIONS = {
+    "5": {
+        "attempts": 5,
+        "stars": 15
+    },
+
+    "10": {
+        "attempts": 10,
+        "stars": 20
+    },
+
+    "15": {
+        "attempts": 15,
+        "stars": 25
+    }
+}

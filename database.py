@@ -222,3 +222,226 @@ def update_user_name(
         )
 
         connection.commit()
+
+# ============================================================
+# Платные дополнительные попытки (общая база для всех чатов)
+# ============================================================
+
+
+PAID_ATTEMPTS_DATABASE = DATABASE_DIRECTORY / "payd_attemps.sqlite3"
+
+
+
+def get_paid_connection():
+
+    connection = sqlite3.connect(
+        PAID_ATTEMPTS_DATABASE
+    )
+
+    connection.row_factory = sqlite3.Row
+
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS paid_attempts
+        (
+            user_id INTEGER PRIMARY KEY,
+            attempts INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+
+
+    connection.commit()
+
+    return connection
+
+
+
+def add_paid_attempts(
+    user_id: int,
+    amount: int
+):
+
+    with get_paid_connection() as connection:
+
+        connection.execute(
+            """
+            INSERT INTO paid_attempts
+            (
+                user_id,
+                attempts
+            )
+
+            VALUES (?, ?)
+
+
+            ON CONFLICT(user_id)
+
+            DO UPDATE SET
+
+            attempts =
+            attempts + excluded.attempts
+
+            """,
+            (
+                user_id,
+                amount
+            )
+        )
+
+
+        connection.commit()
+
+
+
+def get_paid_attempts(
+    user_id: int
+):
+
+    with get_paid_connection() as connection:
+
+        row = connection.execute(
+            """
+            SELECT attempts
+
+            FROM paid_attempts
+
+            WHERE user_id = ?
+            """,
+            (
+                user_id,
+            )
+        ).fetchone()
+
+
+        if not row:
+            return 0
+
+
+        return row["attempts"]
+
+
+
+def use_paid_attempt(
+    user_id: int
+):
+
+    with get_paid_connection() as connection:
+
+        row = connection.execute(
+            """
+            SELECT attempts
+
+            FROM paid_attempts
+
+            WHERE user_id = ?
+            """,
+            (
+                user_id,
+            )
+        ).fetchone()
+
+
+        if not row or row["attempts"] <= 0:
+
+            return False
+
+
+
+        connection.execute(
+            """
+            UPDATE paid_attempts
+
+            SET attempts = attempts - 1
+
+            WHERE user_id = ?
+
+            """,
+            (
+                user_id,
+            )
+        )
+
+
+        connection.commit()
+
+
+        return True
+
+
+
+
+# ============================================================
+# Выпивание за платную попытку
+# Добавляет литры в рейтинг, но НЕ меняет last_drink
+# ============================================================
+
+
+def drink_paid(
+    chat_id: int,
+    user_id: int,
+    name: str
+):
+
+    amount = round(
+        random.randint(1, 50) / 10,
+        2
+    )
+
+
+    with get_connection(chat_id) as connection:
+
+        connection.execute(
+            """
+            INSERT INTO drinkers
+            (
+                user_id,
+                name,
+                total_liters
+            )
+
+            VALUES (?, ?, ?)
+
+
+            ON CONFLICT(user_id)
+
+            DO UPDATE SET
+
+            name = excluded.name,
+
+
+            total_liters =
+
+            ROUND(
+                drinkers.total_liters +
+                excluded.total_liters,
+                2
+            )
+
+            """,
+            (
+                user_id,
+                name,
+                amount
+            )
+        )
+
+
+        total = connection.execute(
+            """
+            SELECT total_liters
+
+            FROM drinkers
+
+            WHERE user_id = ?
+
+            """,
+            (
+                user_id,
+            )
+        ).fetchone()[0]
+
+
+
+    return amount, float(total)

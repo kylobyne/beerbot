@@ -7,7 +7,12 @@ from aiogram.types import Message
 import messages
 
 from config import COOLDOWN_SECONDS
-from database import drink
+
+from database import (
+    drink,
+    drink_paid,
+    use_paid_attempt
+)
 
 
 router = Router()
@@ -33,6 +38,7 @@ async def command_beer(message: Message):
         return
 
 
+
     # Запрет в личных сообщениях
     if message.chat.type == "private":
 
@@ -56,7 +62,41 @@ async def command_beer(message: Message):
 
 
 
+    # Если обычный КД ещё идёт
     if not success:
+
+
+        # Проверяем купленные попытки
+
+        if use_paid_attempt(
+            message.from_user.id
+        ):
+
+
+            value, total_liters = drink_paid(
+                message.chat.id,
+                message.from_user.id,
+                name
+            )
+
+
+            await message.reply(
+                messages.DRINK_NEXT.format(
+                    name=html.escape(name),
+                    liters=format_liters(value),
+                    total_liters=format_liters(
+                        total_liters
+                    ),
+                    minutes=0,
+                    seconds=0
+                ),
+                parse_mode="HTML"
+            )
+
+
+            return
+
+
 
         minutes, seconds = divmod(
             int(value),
