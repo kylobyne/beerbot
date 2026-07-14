@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
-from config import BUY_OPTIONS
+from config import BUY_OPTIONS, INVOICE_LIFETIME
 from database import (
     add_paid_attempts, 
     get_paid_attempts, 
@@ -19,7 +19,6 @@ import messages
 router = Router()
 
 # Срок действия инвойса в секундах (10 минут = 600 секунд)
-INVOICE_LIFETIME = 600
 
 
 @router.message(Command("buy"))
