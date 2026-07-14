@@ -1,20 +1,14 @@
-import messages
 import html
-from aiogram import Router, F
+import messages
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    LabeledPrice,
-    PreCheckoutQuery
-)
+from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 from config import BUY_OPTIONS
-
 from database import add_paid_attempts, get_paid_attempts
 
-
 router = Router()
+
 
 @router.message(Command("buy"))
 async def command_buy(message: Message):
@@ -25,136 +19,103 @@ async def command_buy(message: Message):
     for key, item in BUY_OPTIONS.items():
         # 1. По умолчанию текст стандартный
         button_text = f"{item['attempts']} попыток - ⭐{item['stars']}"
-        
+
         # 2. Меняем текст только для тарифа на 10 попыток
-        if item['attempts'] == 10:
+        if item["attempts"] == 10:
             button_text = f"🥇 {item['attempts']} попыток - ⭐{item['stars']}"
-            
-        # Можно добавить кастомный текст и для других кнопок
-        #elif item['attempts'] == 15:
-        #    button_text = f"💎 ВЫГОДНО! {item['attempts']} попыток - ⭐{item['stars']}"
 
-        builder.button(
-            text=button_text,
-            callback_data=f"buy:{key}"
-        )
+        builder.button(text=button_text, callback_data=f"buy:{key}")
 
+    name = message.from_user.full_name if message.from_user else "Игрок"
     builder.adjust(1)
 
     await message.answer(
-        messages.BUY_MENU,
+        messages.BUY_MENU.format(name=html.escape(name)),
         reply_markup=builder.as_markup(),
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
 
-
-
-@router.callback_query(
-    F.data.startswith("buy:")
-)
-async def buy_callback(
-    callback: CallbackQuery
-):
-
-    value = callback.data.split(":")[1]
-
-
-    if value not in BUY_OPTIONS:
-
-        await callback.answer(
-            "Ошибка покупки",
-            show_alert=True
-        )
-
+@router.callback_query(F.data.startswith("buy:"))
+async def buy_callback(callback: CallbackQuery):
+    # Безопасное разделение строки по двоеточию
+    parts = callback.data.split(":")
+    if len(parts) < 2:
+        await callback.answer("Неверный формат данных", show_alert=True)
         return
 
+    value = parts[1]
 
+    if value not in BUY_OPTIONS:
+        await callback.answer("Ошибка покупки", show_alert=True)
+        return
 
     item = BUY_OPTIONS[value]
 
-
     await callback.message.answer_invoice(
         title="Активации",
-
-        description=(
-            f"Оплата {item['attempts']} активаций"
-        ),
-
-        payload=f"paid_attempts:{item['attempts']}",
-
+        description=f"Оплата {item['attempts']} активаций",
+        # Передаем ID чата через нижнее подчеркивание прямо в payload
+        payload=f"paid_attempts:{item['attempts']}_{callback.message.chat.id}",
         provider_token="",
-
         currency="XTR",
-
-        prices=[
-            LabeledPrice(
-                label="Telegram Stars",
-                amount=item["stars"]
-            )
-        ]
+        prices=[LabeledPrice(label="Telegram Stars", amount=item["stars"])],
     )
-
 
     await callback.answer()
 
 
-
-
-
 @router.pre_checkout_query()
-async def process_pre_checkout(
-    query: PreCheckoutQuery
-):
-
-    await query.answer(
-        ok=True
-    )
+async def process_pre_checkout(query: PreCheckoutQuery):
+    await query.answer(ok=True)
 
 
-
-
-
-@router.message(
-    F.successful_payment
-)
-async def successful_payment(
-    message: Message
-):
-    name = message.from_user.full_name
-    payload = (
-        message.successful_payment.invoice_payload
-    )
-
-
-    if not payload.startswith(
-        "paid_attempts:"
-    ):
+@router.message(F.successful_payment)
+async def successful_payment(message: Message):
+    if not message.from_user:
         return
 
+    payload = message.successful_payment.invoice_payload
+    if not payload.startswith("paid_attempts:"):
+        return
 
+    # ИСПРАВЛЕНО: Безопасно извлекаем данные после "paid_attempts:"
+    try:
+        # Из "paid_attempts:10_-100123456789" получаем "10_-100123456789"
+        raw_data = payload.split(":", 1)[1]
+        # Разделяем попытки и сохраненный ID чата группы
+        attempts_str, target_chat_id_str = raw_data.split("_", 1)
 
-    attempts = int(
-        payload.split(":")[1]
-    )
+        attempts = int(attempts_str)
+        target_chat_id = int(target_chat_id_str)
+    except (IndexError, ValueError):
+        # Если payload поврежден или изменен, прерываем обработку
+        return
 
+    # Запись в БД
+    add_paid_attempts(message.from_user.id, attempts)
+    total_attempts = get_paid_attempts(message.from_user.id)
 
-    add_paid_attempts(
-        message.from_user.id,
-        attempts
-    )
+    name = message.from_user.full_name
 
-
-    total_attempts = get_paid_attempts(
-        message.from_user.id
-    )
-
-
-    await message.answer(
-        messages.BUY_SUCCESS.format(
-            name=html.escape(name),
-            attempts=attempts,
-            total_attempts=total_attempts
-        ),
-        parse_mode="HTML"
-    )
+    # Отправляем сообщение строго в исходный чат, где была оплата
+    try:
+        await message.bot.send_message(
+            chat_id=target_chat_id,
+            text=messages.BUY_SUCCESS.format(
+                name=html.escape(name),
+                attempts=attempts,
+                total_attempts=total_attempts,
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        # Если бота кикнули из группы пока шла оплата, отправим в ЛС как резерв
+        await message.answer(
+            text=messages.BUY_SUCCESS.format(
+                name=html.escape(name),
+                attempts=attempts,
+                total_attempts=total_attempts,
+            ),
+            parse_mode="HTML",
+        )
