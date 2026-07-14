@@ -46,8 +46,8 @@ RANK_EMOJIS = {
 }
 
 BUY_SUCCESS = (
-    '<tg-emoji emoji-id="5264737672684907396">🍻</tg-emoji> <b>Успешная покупка <i>{attempts}</i> попыток!</b>\n\n'
-    "Всего доступно попыток: {total_attempts"
+    '<tg-emoji emoji-id="5264737672684907396">🍻</tg-emoji> <b>Успешная покупка попыток!</b>(+{attempts})\n\n'
+    "Теперь доступно попыток: {total_attempts}"
 )
 
 BUY_MENU = (
