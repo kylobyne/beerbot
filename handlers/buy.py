@@ -4,7 +4,9 @@ import time
 import uuid
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
+from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 
 from config import BUY_OPTIONS, INVOICE_LIFETIME
 from database import (
@@ -23,19 +25,23 @@ router = Router()
 
 @router.message(Command("buy"))
 async def command_buy(message: Message):
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
     builder = InlineKeyboardBuilder()
 
     for key, item in BUY_OPTIONS.items():
-        # 1. По умолчанию текст стандартный
         button_text = f"{item['attempts']} попыток - ⭐{item['stars']}"
 
-        # 2. Меняем текст только для тарифа на 10 попыток
+        # Если это тариф на 10 попыток, создаем кнопку с премиум-эмодзи
         if item["attempts"] == 10:
-            button_text = f"🥇 {item['attempts']} попыток - ⭐{item['stars']}"
-
-        builder.button(text=button_text, callback_data=f"buy:{key}")
+            builder.add(
+                InlineKeyboardButton(
+                    text=button_text,
+                    callback_data=f"buy:{key}",
+                    icon_custom_emoji_id="5440539497383087970",  # ID вашего премиум-эмодзи
+                )
+            )
+        else:
+            # Для остальных тарифов используем привычный метод
+            builder.button(text=button_text, callback_data=f"buy:{key}")
 
     name = message.from_user.full_name if message.from_user else "Игрок"
     builder.adjust(1)
@@ -45,7 +51,6 @@ async def command_buy(message: Message):
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
-
 
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_callback(callback: CallbackQuery):
