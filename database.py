@@ -146,59 +146,24 @@ def drink(chat_id: int, user_id: int, name: str):
 
 
 
-def get_leaderboard(chat_id:int,page:int):
-
+def get_leaderboard(chat_id: int):
+    """Возвращает ВСЕХ пользователей чата с литрами >= 0.1 для последующей фильтрации."""
     with get_connection(chat_id) as connection:
-
-        total = connection.execute(
-            """
-            SELECT COUNT(*)
-            FROM drinkers
-            WHERE total_liters >= 0.1
-            """
-        ).fetchone()[0]
-
-
-        pages = max(
-            1,
-            (total + ROWS_PER_PAGE - 1)
-            // ROWS_PER_PAGE
-        )
-
-
-        page = max(
-            0,
-            min(page,pages-1)
-        )
-
-
         rows = connection.execute(
             """
             SELECT
-            user_id,
-            name,
-            total_liters
-
+                user_id,
+                name,
+                total_liters
             FROM drinkers
-
             WHERE total_liters >= 0.1
-
             ORDER BY
-            total_liters DESC,
-            name COLLATE NOCASE ASC
-
-            LIMIT ?
-            OFFSET ?
-
-            """,
-            (
-                ROWS_PER_PAGE,
-                page * ROWS_PER_PAGE
-            )
+                total_liters DESC,
+                name COLLATE NOCASE ASC
+            """
         ).fetchall()
-
-
-    return rows,pages
+        
+    return rows
 
 
 
