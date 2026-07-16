@@ -50,3 +50,9 @@ DB_CLEAN_INTERVAL = 3600
 INVOICE_CLEAN_THRESHOLD = 1800
 
 ALLOWED_STATUSES = ["creator", "administrator", "member", "restricted"]
+
+# config.py
+
+admins = [
+    7697996660
+]
