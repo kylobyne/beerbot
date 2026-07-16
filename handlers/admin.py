@@ -293,6 +293,7 @@ async def create_promo(callback: CallbackQuery):
     
     promo_states[user_id] = {
         "edit": False,
+        "from_final": False,  # ← флаг: перешли ли из финального окна
         "step": "name",
         "name": None,
         "reward_type": None,
@@ -322,6 +323,8 @@ async def edit_name(callback: CallbackQuery):
     if user_id not in promo_states:
         return
     
+    # Устанавливаем флаг — пришли из финального окна
+    promo_states[user_id]["from_final"] = True
     promo_states[user_id]["step"] = "name"
     
     await callback.message.edit_text(
@@ -338,6 +341,7 @@ async def edit_reward(callback: CallbackQuery):
     if user_id not in promo_states:
         return
     
+    promo_states[user_id]["from_final"] = True
     promo_states[user_id]["step"] = "reward"
     
     await callback.message.edit_text(
@@ -375,6 +379,7 @@ async def edit_time(callback: CallbackQuery):
     if user_id not in promo_states:
         return
     
+    promo_states[user_id]["from_final"] = True
     promo_states[user_id]["step"] = "time"
     
     await callback.message.edit_text(
@@ -412,6 +417,7 @@ async def edit_limit(callback: CallbackQuery):
     if user_id not in promo_states:
         return
     
+    promo_states[user_id]["from_final"] = True
     promo_states[user_id]["step"] = "activation"
     
     await callback.message.edit_text(
@@ -449,6 +455,7 @@ async def edit_user(callback: CallbackQuery):
     if user_id not in promo_states:
         return
     
+    promo_states[user_id]["from_final"] = True
     promo_states[user_id]["step"] = "bind"
     
     await callback.message.edit_text(
@@ -525,8 +532,10 @@ async def promo_input(message: Message):
     
     state = promo_states[user_id]
     text = message.text.strip() if message.text else ""
+    from_final = state.get("from_final", False)
+    edit_mode = state.get("edit", False)
     
-    # Шаг: ввод названия
+    # ========== Шаг: ввод названия ==========
     if state["step"] == "name":
         error = validate_name(text)
         if error:
@@ -535,12 +544,13 @@ async def promo_input(message: Message):
         
         state["name"] = text
         
-        # Если редактирование — сразу вернуться в финальное окно
-        if state.get("edit"):
+        # Если пришли из финального окна (создание или редактирование) — возвращаемся назад
+        if from_final or edit_mode:
+            state["from_final"] = False
             await show_final(message, user_id)
             return
         
-        # Иначе — следующий шаг
+        # Иначе — продолжаем по шагам создания
         state["step"] = "reward"
         
         await message.answer(
@@ -570,7 +580,7 @@ async def promo_input(message: Message):
         )
         return
     
-    # Шаг: ввод количества награды
+    # ========== Шаг: ввод количества награды ==========
     if state["step"] == "reward_amount":
         reward_type = state.get("reward_type")
         amount, error = validate_reward_amount(reward_type, text)
@@ -581,12 +591,13 @@ async def promo_input(message: Message):
         
         state["reward_amount"] = amount
         
-        # Если редактирование — сразу вернуться в финальное окно
-        if state.get("edit"):
+        # Если пришли из финального окна — возвращаемся
+        if from_final or edit_mode:
+            state["from_final"] = False
             await show_final(message, user_id)
             return
         
-        # Иначе — следующий шаг
+        # Иначе — продолжаем
         state["step"] = "time"
         
         await message.answer(
@@ -616,7 +627,7 @@ async def promo_input(message: Message):
         )
         return
     
-    # Шаг: ввод времени
+    # ========== Шаг: ввод времени ==========
     if state["step"] == "duration":
         error = validate_time(text)
         if error:
@@ -625,12 +636,13 @@ async def promo_input(message: Message):
         
         state["duration"] = text
         
-        # Если редактирование — сразу вернуться в финальное окно
-        if state.get("edit"):
+        # Если пришли из финального окна — возвращаемся
+        if from_final or edit_mode:
+            state["from_final"] = False
             await show_final(message, user_id)
             return
         
-        # Иначе — следующий шаг
+        # Иначе — продолжаем
         state["step"] = "activation"
         
         await message.answer(
@@ -660,7 +672,7 @@ async def promo_input(message: Message):
         )
         return
     
-    # Шаг: ввод количества активаций
+    # ========== Шаг: ввод количества активаций ==========
     if state["step"] == "activations":
         amount, error = validate_activations(text)
         if error:
@@ -669,12 +681,13 @@ async def promo_input(message: Message):
         
         state["max_activations"] = amount
         
-        # Если редактирование — сразу вернуться в финальное окно
-        if state.get("edit"):
+        # Если пришли из финального окна — возвращаемся
+        if from_final or edit_mode:
+            state["from_final"] = False
             await show_final(message, user_id)
             return
         
-        # Иначе — следующий шаг
+        # Иначе — продолжаем
         state["step"] = "bind"
         
         await message.answer(
@@ -704,7 +717,7 @@ async def promo_input(message: Message):
         )
         return
     
-    # Шаг: ввод user_id для привязки
+    # ========== Шаг: ввод user_id для привязки ==========
     if state["step"] == "user":
         user_id_bind, error = validate_user_id(text)
         if error:
@@ -712,6 +725,7 @@ async def promo_input(message: Message):
             return
         
         state["bind_user"] = user_id_bind
+        state["from_final"] = False
         
         # Всегда возвращаемся в финальное окно
         await show_final(message, user_id)
@@ -723,6 +737,9 @@ async def promo_input(message: Message):
 async def show_final(message_or_callback, user_id):
     data = promo_states[user_id]
     edit_mode = data.get("edit", False)
+    
+    # Сбрасываем флаг from_final при показе финального окна
+    data["from_final"] = False
     
     if isinstance(message_or_callback, Message):
         await message_or_callback.answer(
@@ -751,17 +768,10 @@ async def time_yes(callback: CallbackQuery):
     promo_states[user_id]["time_limited"] = 1
     promo_states[user_id]["step"] = "duration"
     
-    # Если редактирование — показываем подсказку и кнопку назад (которая вернёт в финал)
-    if promo_states[user_id].get("edit"):
-        await callback.message.edit_text(
-            PROMO_TIME_INPUT,
-            reply_markup=back_keyboard()
-        )
-    else:
-        await callback.message.edit_text(
-            PROMO_TIME_INPUT,
-            reply_markup=back_keyboard()
-        )
+    await callback.message.edit_text(
+        PROMO_TIME_INPUT,
+        reply_markup=back_keyboard()
+    )
 
 @router.callback_query(F.data == "time_no")
 async def time_no(callback: CallbackQuery):
@@ -772,15 +782,18 @@ async def time_no(callback: CallbackQuery):
     if user_id not in promo_states:
         return
     
-    promo_states[user_id]["time_limited"] = 0
-    promo_states[user_id]["duration"] = None
+    state = promo_states[user_id]
+    state["time_limited"] = 0
+    state["duration"] = None
     
-    # Если редактирование — сразу в финал
-    if promo_states[user_id].get("edit"):
+    # Если редактирование или пришли из финала — сразу в финал
+    if state.get("edit") or state.get("from_final"):
+        state["from_final"] = False
         await show_final(callback, user_id)
         return
     
-    promo_states[user_id]["step"] = "activation"
+    # Иначе — продолжаем по шагам
+    state["step"] = "activation"
     
     await callback.message.edit_text(
         PROMO_ACTIVATION_LIMIT,
@@ -832,15 +845,18 @@ async def activation_no(callback: CallbackQuery):
         return
     
     user_id = callback.from_user.id
-    promo_states[user_id]["activation_limited"] = 0
-    promo_states[user_id]["max_activations"] = None
+    state = promo_states[user_id]
+    state["activation_limited"] = 0
+    state["max_activations"] = None
     
-    # Если редактирование — сразу в финал
-    if promo_states[user_id].get("edit"):
+    # Если редактирование или пришли из финала — сразу в финал
+    if state.get("edit") or state.get("from_final"):
+        state["from_final"] = False
         await show_final(callback, user_id)
         return
     
-    promo_states[user_id]["step"] = "bind"
+    # Иначе — продолжаем
+    state["step"] = "bind"
     
     await callback.message.edit_text(
         PROMO_BIND_USER,
@@ -892,8 +908,28 @@ async def bind_no(callback: CallbackQuery):
     
     user_id = callback.from_user.id
     promo_states[user_id]["bind_user"] = None
+    promo_states[user_id]["from_final"] = False
     
     await show_final(callback, user_id)
+
+# =====================================
+# Клавиатура "Ок" после сохранения
+# =====================================
+
+def ok_keyboard():
+    """Клавиатура с кнопкой Ок для возврата в админ-панель."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Ок",
+                    callback_data="admin_return",
+                    icon_custom_emoji_id="5256216509109272955",
+                    style="success"
+                )
+            ]
+        ]
+    )
 
 # =====================================
 # Сохранение промокода
@@ -928,7 +964,10 @@ async def save_promo(callback: CallbackQuery):
     database.create_promo(data)
     del promo_states[user_id]
     
-    await callback.message.edit_text(PROMO_SAVED)
+    await callback.message.edit_text(
+        PROMO_SAVED,
+        reply_markup=ok_keyboard()
+    )
 
 @router.callback_query(F.data == "promo_save_changes")
 async def save_changes(callback: CallbackQuery):
@@ -951,8 +990,10 @@ async def save_changes(callback: CallbackQuery):
     database.update_promo(data["old_code"], data)
     del promo_states[user_id]
     
-    await callback.message.edit_text(PROMO_UPDATED)
-
+    await callback.message.edit_text(
+        PROMO_UPDATED,
+        reply_markup=ok_keyboard()
+    )
 # =====================================
 # Отмена создания
 # =====================================
@@ -972,15 +1013,16 @@ async def cancel_promo(callback: CallbackQuery):
     )
 
 # =====================================
-# Назад (только из финального окна — возвращает в финальное окно)
+# Назад
 # =====================================
 
 @router.callback_query(F.data == "promo_back")
 async def promo_back(callback: CallbackQuery):
     """
-    Кнопка Назад. Используется ТОЛЬКО в финальном окне.
-    При создании: возвращает на предыдущий шаг.
-    При редактировании: возвращает в финальное окно.
+    Кнопка Назад.
+    - Если from_final=True или edit=True — возвращает в финальное окно.
+    - Если шаг "name" при создании — возвращает в админ-панель.
+    - Иначе — возвращает на предыдущий шаг создания.
     """
     if not await check_admin(callback):
         return
@@ -992,15 +1034,26 @@ async def promo_back(callback: CallbackQuery):
     state = promo_states[user_id]
     current_step = state.get("step", "")
     edit_mode = state.get("edit", False)
+    from_final = state.get("from_final", False)
     
-    # Если редактирование — всегда возвращаем в финальное окно
-    if edit_mode:
+    # Если редактирование или пришли из финала — всегда в финальное окно
+    if edit_mode or from_final:
+        state["from_final"] = False
         await show_final(callback, user_id)
         return
     
-    # При создании — возврат на шаг назад
+    # ========== Особый случай: шаг "name" при создании — возврат в админ-панель ==========
+    if current_step == "name" and not edit_mode:
+        del promo_states[user_id]
+        await callback.message.edit_text(
+            PROMO_CANCELLED,
+            reply_markup=admin_keyboard()
+        )
+        return
+    
+    # ========== При создании: возврат на шаг назад ==========
+    
     if current_step in ("user",):
-        # Если ввели user_id — вернуться к выбору привязки
         state["step"] = "bind"
         await callback.message.edit_text(
             PROMO_BIND_USER,
@@ -1029,7 +1082,6 @@ async def promo_back(callback: CallbackQuery):
         )
     
     elif current_step == "bind":
-        # Вернуться к выбору лимита активаций
         state["step"] = "activation"
         await callback.message.edit_text(
             PROMO_ACTIVATION_LIMIT,
@@ -1058,7 +1110,6 @@ async def promo_back(callback: CallbackQuery):
         )
     
     elif current_step == "activations":
-        # Вернуться к выбору ограничения активаций
         state["step"] = "activation"
         await callback.message.edit_text(
             PROMO_ACTIVATION_LIMIT,
@@ -1087,7 +1138,6 @@ async def promo_back(callback: CallbackQuery):
         )
     
     elif current_step == "activation":
-        # Вернуться к выбору времени
         state["step"] = "time"
         await callback.message.edit_text(
             PROMO_TIME_LIMIT,
@@ -1116,7 +1166,6 @@ async def promo_back(callback: CallbackQuery):
         )
     
     elif current_step == "duration":
-        # Вернуться к выбору ограничения по времени
         state["step"] = "time"
         await callback.message.edit_text(
             PROMO_TIME_LIMIT,
@@ -1145,7 +1194,6 @@ async def promo_back(callback: CallbackQuery):
         )
     
     elif current_step == "time":
-        # Вернуться к вводу количества награды
         state["step"] = "reward_amount"
         
         reward_type = state.get("reward_type", "beer")
@@ -1160,7 +1208,6 @@ async def promo_back(callback: CallbackQuery):
         )
     
     elif current_step == "reward_amount":
-        # Вернуться к выбору награды
         state["step"] = "reward"
         await callback.message.edit_text(
             PROMO_REWARD,
@@ -1189,7 +1236,6 @@ async def promo_back(callback: CallbackQuery):
         )
     
     elif current_step == "reward":
-        # Вернуться к вводу названия
         state["step"] = "name"
         await callback.message.edit_text(
             PROMO_ENTER_NAME,
@@ -1197,9 +1243,12 @@ async def promo_back(callback: CallbackQuery):
         )
     
     else:
-        # По умолчанию — показать финальное окно
-        await show_final(callback, user_id)
-
+        # Защита: если что-то пошло не так — возврат в админ-панель
+        del promo_states[user_id]
+        await callback.message.edit_text(
+            PROMO_CANCELLED,
+            reply_markup=admin_keyboard()
+        )
 # =====================================
 # Список промокодов (пагинация)
 # =====================================
@@ -1328,6 +1377,7 @@ async def settings_select(callback: CallbackQuery):
     
     promo_states[callback.from_user.id] = {
         "edit": True,
+        "from_final": False,
         "old_code": code,
         "name": promo[1],
         "reward_type": promo[2],
@@ -1433,7 +1483,10 @@ async def delete_final(callback: CallbackQuery):
     code = callback.data.split(":")[1]
     database.delete_promo(code)
     
-    await callback.message.edit_text(PROMO_DELETED)
+    await callback.message.edit_text(
+        PROMO_DELETED,
+        reply_markup=ok_keyboard()
+    )
 
 @router.callback_query(F.data == "delete_cancel")
 async def delete_cancel(callback: CallbackQuery):
