@@ -450,7 +450,7 @@ python-dotenv>=1.0,&lt;2.0  # Загрузка переменных окруже
 
 <h2>💬 Поддержка</h2>
 
-<p>По всем вопросам обращайтесь в <a href="https://t.me/yourusername">Telegram</a> или создавайте Issue в репозитории.</p>
+<p>По всем вопросам обращайтесь в <a href="https://t.me/kylobyne">Telegram</a> или создавайте Issue в репозитории.</p>
 
 <hr>
 
