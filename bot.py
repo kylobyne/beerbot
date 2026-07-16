@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher
 
 # ДОБАВЛЕНО: Импортируем интервал очистки из конфигурации
 from config import TOKEN, DB_CLEAN_INTERVAL
-from database import delete_old_pending_invoices
+from database import delete_old_pending_invoices, deactivate_expired_promos  # ДОБАВЛЕНА deactivate_expired_promos
 # ШАГ 1: Добавляем admin в импорт (измените имя файла, если оно другое)
 from handlers import beer, buy, start, stats, admin, promo
 
@@ -16,7 +16,8 @@ async def periodic_db_cleaner():
     while True:
         try:
             delete_old_pending_invoices()
-            logging.info("[DB/Background] Автоматическая очистка просроченных инвойсов выполнена.")
+            deactivate_expired_promos()  # ДОБАВЛЕНО: Деактивация истекших промокодов
+            logging.info("[DB/Background] Автоматическая очистка просроченных инвойсов и промокодов выполнена.")
         except Exception as e:
             logging.error(f"[DB/Background] Ошибка фоновой очистки: {e}")
         

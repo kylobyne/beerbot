@@ -2,7 +2,7 @@ import random
 import re
 import sqlite3
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from config import (
     DATABASE_DIRECTORY,
@@ -798,6 +798,89 @@ def has_used_promo(promo_id: int, user_id: int) -> bool:
     return count > 0
 
 
+def is_expires_at_expired(expires_at: str) -> bool:
+    """
+    Проверяет, истекла ли дата.
+    Поддерживает форматы:
+    - ДД.ММ.ГГГГ ЧЧ:ММ
+    - ДД.ММ.ГГ ЧЧ:ММ
+    - ДД.ММ.ГГГГ (до конца дня)
+    - ДД.ММ.ГГ (до конца дня)
+    """
+    if not expires_at:
+        return False
+    
+    try:
+        expiry = datetime.strptime(expires_at, "%d.%m.%Y %H:%M")
+        return datetime.now() > expiry
+    except ValueError:
+        pass
+    
+    try:
+        expiry = datetime.strptime(expires_at, "%d.%m.%y %H:%M")
+        return datetime.now() > expiry
+    except ValueError:
+        pass
+    
+    try:
+        expiry = datetime.strptime(expires_at, "%d.%m.%Y")
+        expiry = expiry.replace(hour=23, minute=59, second=59)
+        return datetime.now() > expiry
+    except ValueError:
+        pass
+    
+    try:
+        expiry = datetime.strptime(expires_at, "%d.%m.%y")
+        expiry = expiry.replace(hour=23, minute=59, second=59)
+        return datetime.now() > expiry
+    except ValueError:
+        pass
+    
+    return False
+
+
+def is_duration_expired(duration: str, created_at: str) -> bool:
+    """
+    Проверяет, истекла ли длительность.
+    Поддерживает форматы: 2d, 5h, 30m, 10s, 2d5h30m, 3h15m, 2h5s
+    """
+    if not duration or not created_at:
+        return False
+    
+    try:
+        created = datetime.strptime(created_at, "%d.%m.%Y %H:%M")
+    except ValueError:
+        return False
+    
+    days = 0
+    hours = 0
+    minutes = 0
+    seconds = 0
+    
+    d_match = re.search(r'(\d+)d', duration)
+    h_match = re.search(r'(\d+)h', duration)
+    m_match = re.search(r'(\d+)m', duration)
+    s_match = re.search(r'(\d+)s', duration)
+    
+    if d_match:
+        days = int(d_match.group(1))
+    if h_match:
+        hours = int(h_match.group(1))
+    if m_match:
+        minutes = int(m_match.group(1))
+    if s_match:
+        seconds = int(s_match.group(1))
+    
+    expiry = created + timedelta(
+        days=days,
+        hours=hours,
+        minutes=minutes,
+        seconds=seconds
+    )
+    
+    return datetime.now() > expiry
+
+
 def use_promo(promo_id: int, user_id: int):
     """Записывает использование промокода и проверяет, не исчерпан ли он."""
     db = promo_connect()
@@ -836,13 +919,14 @@ def use_promo(promo_id: int, user_id: int):
 
 
 def is_promo_exhausted(promo_id: int) -> bool:
-    """Проверяет, активировали ли все привязанные пользователи промокод."""
+    """Проверяет, исчерпан ли промокод (с учетом времени)."""
     db = promo_connect()
     cursor = db.cursor()
 
     cursor.execute(
         """
-        SELECT bind_users, activation_limited, max_activations, used_count
+        SELECT bind_users, activation_limited, max_activations, used_count,
+               time_limited, expires_at, duration, created_at, active
         FROM promocodes
         WHERE id = ?
         """,
@@ -859,11 +943,35 @@ def is_promo_exhausted(promo_id: int) -> bool:
     activation_limited = promo[1]
     max_activations = promo[2]
     used_count = promo[3]
+    time_limited = promo[4]
+    expires_at = promo[5]
+    duration = promo[6]
+    created_at = promo[7]
+    active = promo[8]
 
+    # Если уже неактивен
+    if not active:
+        db.close()
+        return True
+
+    # ПРОВЕРКА ВРЕМЕНИ
+    if time_limited:
+        # Проверка по expires_at
+        if expires_at and is_expires_at_expired(expires_at):
+            db.close()
+            return True
+        
+        # Проверка по duration
+        if duration and is_duration_expired(duration, created_at):
+            db.close()
+            return True
+
+    # Проверка по лимиту активаций
     if activation_limited and used_count >= max_activations:
         db.close()
         return True
 
+    # Проверка по привязанным пользователям
     if bind_users:
         user_ids = [int(uid.strip()) for uid in bind_users.split(",") if uid.strip()]
 
@@ -904,6 +1012,43 @@ def deactivate_promo(code: str):
 
     db.commit()
     db.close()
+
+
+def deactivate_expired_promos():
+    """Деактивирует все промокоды с истекшим временем действия."""
+    db = promo_connect()
+    cursor = db.cursor()
+    
+    # Получаем все активные промокоды с ограничением по времени
+    cursor.execute(
+        """
+        SELECT id, code, expires_at, duration, created_at, time_limited
+        FROM promocodes
+        WHERE active = 1 AND time_limited = 1
+        """
+    )
+    
+    promos = cursor.fetchall()
+    db.close()
+    
+    for promo in promos:
+        promo_id = promo[0]
+        code = promo[1]
+        expires_at = promo[2]
+        duration = promo[3]
+        created_at = promo[4]
+        is_expired = False
+        
+        # Проверяем expires_at
+        if expires_at and is_expires_at_expired(expires_at):
+            is_expired = True
+        
+        # Проверяем duration
+        if not is_expired and duration and is_duration_expired(duration, created_at):
+            is_expired = True
+        
+        if is_expired:
+            deactivate_promo(code)
 
 
 def add_beer_reward(chat_id: int, user_id: int, name: str, amount: float):

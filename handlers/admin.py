@@ -10,7 +10,7 @@ from aiogram.types import (
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from messages import *
 import database
@@ -80,25 +80,43 @@ def validate_reward_amount(reward_type: str, amount_str: str) -> tuple[int | flo
         return None, VALIDATE_REWARD_NUMBER
 
 def validate_time(duration: str) -> str | None:
+    """
+    Валидация времени с поддержкой:
+    - Даты: ДД.ММ.ГГГГ, ДД.ММ.ГГ, ДД.ММ.ГГГГ ЧЧ:ММ, ДД.ММ.ГГ ЧЧ:ММ
+    - Длительности: 2d, 5h, 30m, 2d5h30m, 3h15m, 10m, 2h5s
+    """
     if not duration:
         return VALIDATE_TIME_EMPTY
     
     duration = duration.strip()
     
+    # =========================================
+    # 1. Проверка формата ДАТЫ (с временем или без)
+    # =========================================
     date_patterns = [
-        r'^\d{2}\.\d{2}\.\d{2}$',
-        r'^\d{2}\.\d{2}\.\d{4}$'
+        r'^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$',  # ДД.ММ.ГГГГ ЧЧ:ММ
+        r'^\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}$',   # ДД.ММ.ГГ ЧЧ:ММ
+        r'^\d{2}\.\d{2}\.\d{4}$',               # ДД.ММ.ГГГГ
+        r'^\d{2}\.\d{2}\.\d{2}$'                # ДД.ММ.ГГ
     ]
     
     for pattern in date_patterns:
         if re.match(pattern, duration):
             try:
-                if len(duration.split('.')[2]) == 2:
-                    parsed_date = datetime.strptime(duration, "%d.%m.%y")
-                else:
-                    parsed_date = datetime.strptime(duration, "%d.%m.%Y")
+                if ' ' in duration:  # С временем
+                    if len(duration.split('.')[2].split()[0]) == 2:
+                        parsed_date = datetime.strptime(duration, "%d.%m.%y %H:%M")
+                    else:
+                        parsed_date = datetime.strptime(duration, "%d.%m.%Y %H:%M")
+                else:  # Только дата (до конца дня)
+                    if len(duration.split('.')[2]) == 2:
+                        parsed_date = datetime.strptime(duration, "%d.%m.%y")
+                        parsed_date = parsed_date.replace(hour=23, minute=59)
+                    else:
+                        parsed_date = datetime.strptime(duration, "%d.%m.%Y")
+                        parsed_date = parsed_date.replace(hour=23, minute=59)
                 
-                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                today = datetime.now()
                 if parsed_date < today:
                     return VALIDATE_TIME_PAST_DATE
                 
@@ -106,9 +124,12 @@ def validate_time(duration: str) -> str | None:
             except ValueError:
                 return VALIDATE_TIME_INVALID_DATE
     
-    duration_pattern = r'^(\d+h)?(\d+m)?(\d+s)?$'
+    # =========================================
+    # 2. Проверка формата ДЛИТЕЛЬНОСТИ (с поддержкой d, h, m, s)
+    # =========================================
+    duration_pattern = r'^(\d+d)?(\d+h)?(\d+m)?(\d+s)?$'
     if re.match(duration_pattern, duration) and duration:
-        if any(unit in duration for unit in ['h', 'm', 's']):
+        if any(unit in duration for unit in ['d', 'h', 'm', 's']):
             return None
     
     return VALIDATE_TIME_INVALID_FORMAT

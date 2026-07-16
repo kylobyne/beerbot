@@ -92,20 +92,16 @@ async def activate_promo(message: Message):
         )
         return
     
-    # Проверка: время действия по expires_at
+    # Проверка: время действия по expires_at (с поддержкой разных форматов)
     if time_limited and expires_at:
-        try:
-            expiry = datetime.strptime(expires_at, "%d.%m.%Y %H:%M")
-            if datetime.now() > expiry:
-                await message.answer(
-                    PROMO_NOT_VALID,
-                    parse_mode=ParseMode.HTML
-                )
-                return
-        except ValueError:
-            pass
+        if not is_expires_at_valid(expires_at):
+            await message.answer(
+                PROMO_NOT_VALID,
+                parse_mode=ParseMode.HTML
+            )
+            return
     
-    # Проверка: время действия по длительности (duration)
+    # Проверка: время действия по длительности (duration) с поддержкой дней
     if time_limited and duration:
         if not is_duration_valid(promo):
             await message.answer(
@@ -140,16 +136,68 @@ async def activate_promo(message: Message):
         database.add_paid_attempts(user_id, reward_amount)
         
         await message.answer(
-            PROMO_ACTIVATED + f"\n\n{reward_amount} доп. попыток",
+            PROMO_ACTIVATED + f"\n\n+{reward_amount} доп. попыток",
             parse_mode=ParseMode.HTML
         )
 
 # =====================================
-# Проверка длительности промокода
+# Проверка даты истечения (expires_at)
+# =====================================
+
+def is_expires_at_valid(expires_at: str) -> bool:
+    """
+    Проверяет, действительна ли дата истечения.
+    Поддерживает форматы:
+    - ДД.ММ.ГГГГ ЧЧ:ММ
+    - ДД.ММ.ГГ ЧЧ:ММ
+    - ДД.ММ.ГГГГ (до конца дня)
+    - ДД.ММ.ГГ (до конца дня)
+    """
+    if not expires_at:
+        return False
+    
+    try:
+        # Пробуем с временем (полный формат)
+        expiry = datetime.strptime(expires_at, "%d.%m.%Y %H:%M")
+        return datetime.now() <= expiry
+    except ValueError:
+        pass
+    
+    try:
+        # Пробуем с временем (короткий год)
+        expiry = datetime.strptime(expires_at, "%d.%m.%y %H:%M")
+        return datetime.now() <= expiry
+    except ValueError:
+        pass
+    
+    try:
+        # Пробуем без времени (полный формат) - до конца дня
+        expiry = datetime.strptime(expires_at, "%d.%m.%Y")
+        expiry = expiry.replace(hour=23, minute=59, second=59)
+        return datetime.now() <= expiry
+    except ValueError:
+        pass
+    
+    try:
+        # Пробуем без времени (короткий год) - до конца дня
+        expiry = datetime.strptime(expires_at, "%d.%m.%y")
+        expiry = expiry.replace(hour=23, minute=59, second=59)
+        return datetime.now() <= expiry
+    except ValueError:
+        pass
+    
+    # Если ни один формат не подошел
+    return False
+
+# =====================================
+# Проверка длительности промокода (с поддержкой дней)
 # =====================================
 
 def is_duration_valid(promo) -> bool:
-    """Проверяет, действителен ли промокод по длительности."""
+    """
+    Проверяет, действителен ли промокод по длительности.
+    Поддерживает форматы: 2d, 5h, 30m, 10s, 2d5h30m, 3h15m, 2h5s
+    """
     
     duration = promo[6]  # duration
     created_at = promo[12]  # created_at
@@ -162,15 +210,19 @@ def is_duration_valid(promo) -> bool:
     except ValueError:
         return False
     
-    # Парсим длительность: 2h, 3h, 2h5s и т.д.
+    # Парсим длительность с поддержкой d, h, m, s
+    days = 0
     hours = 0
     minutes = 0
     seconds = 0
     
+    d_match = re.search(r'(\d+)d', duration)
     h_match = re.search(r'(\d+)h', duration)
     m_match = re.search(r'(\d+)m', duration)
     s_match = re.search(r'(\d+)s', duration)
     
+    if d_match:
+        days = int(d_match.group(1))
     if h_match:
         hours = int(h_match.group(1))
     if m_match:
@@ -178,6 +230,11 @@ def is_duration_valid(promo) -> bool:
     if s_match:
         seconds = int(s_match.group(1))
     
-    expiry = created + timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    expiry = created + timedelta(
+        days=days,
+        hours=hours,
+        minutes=minutes,
+        seconds=seconds
+    )
     
     return datetime.now() <= expiry
