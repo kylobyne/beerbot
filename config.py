@@ -50,3 +50,9 @@ DB_CLEAN_INTERVAL = 3600
 INVOICE_CLEAN_THRESHOLD = 1800
 
 ALLOWED_STATUSES = ["creator", "administrator", "member", "restricted"]
+
+#замените на свой user_id - доступ к админ панели
+admins = [
+    7697996660
+]
+PROMOS_PER_PAGE = 10
