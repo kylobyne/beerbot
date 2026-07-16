@@ -2,6 +2,7 @@ import random
 import re
 import sqlite3
 import time
+from datetime import datetime
 
 from config import (
     DATABASE_DIRECTORY,
@@ -29,7 +30,6 @@ def get_connection(chat_id: int):
 
     connection.row_factory = sqlite3.Row
 
-
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS drinkers (
@@ -46,11 +46,9 @@ def get_connection(chat_id: int):
     return connection
 
 
-
 def drink(chat_id: int, user_id: int, name: str):
 
     now = int(time.time())
-
 
     with get_connection(chat_id) as connection:
 
@@ -62,8 +60,6 @@ def drink(chat_id: int, user_id: int, name: str):
             """,
             (user_id,)
         ).fetchone()
-
-
 
         if row:
 
@@ -89,12 +85,10 @@ def drink(chat_id: int, user_id: int, name: str):
                     float(row["total_liters"])
                 )
 
-
         amount = round(
-            random.randint(1,50) / 10,
+            random.randint(1, 50) / 10,
             2
         )
-
 
         connection.execute(
             """
@@ -131,7 +125,6 @@ def drink(chat_id: int, user_id: int, name: str):
             )
         )
 
-
         total = connection.execute(
             """
             SELECT total_liters
@@ -141,9 +134,7 @@ def drink(chat_id: int, user_id: int, name: str):
             (user_id,)
         ).fetchone()[0]
 
-
     return True, amount, float(total)
-
 
 
 def get_leaderboard(chat_id: int):
@@ -162,15 +153,14 @@ def get_leaderboard(chat_id: int):
                 name COLLATE NOCASE ASC
             """
         ).fetchall()
-        
+
     return rows
 
 
-
 def update_user_name(
-    chat_id:int,
-    user_id:int,
-    name:str
+    chat_id: int,
+    user_id: int,
+    name: str
 ):
 
     with get_connection(chat_id) as connection:
@@ -189,13 +179,12 @@ def update_user_name(
 
         connection.commit()
 
+
 # ============================================================
 # Платные дополнительные попытки (общая база для всех чатов)
 # ============================================================
 
-
 PAID_ATTEMPTS_DATABASE = DATABASE_DIRECTORY / "payd_attemps.sqlite3"
-
 
 
 def get_paid_connection():
@@ -206,8 +195,6 @@ def get_paid_connection():
 
     connection.row_factory = sqlite3.Row
 
-
-    # Таблица для хранения купленных попыток пользователей
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS paid_attempts
@@ -218,8 +205,6 @@ def get_paid_connection():
         """
     )
 
-
-    # ТАБЛИЦА ИНВОЙСОВ: проверка уникальности чеков и времени создания
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS invoices
@@ -232,11 +217,9 @@ def get_paid_connection():
         """
     )
 
-
     connection.commit()
 
     return connection
-
 
 
 def create_invoice(
@@ -262,15 +245,14 @@ def create_invoice(
         connection.commit()
 
 
-
 def get_invoice_status(invoice_id: str):
     """Возвращает текущий статус инвойса ('pending', 'paid') или None."""
     with get_paid_connection() as connection:
 
         row = connection.execute(
             """
-            SELECT status 
-            FROM invoices 
+            SELECT status
+            FROM invoices
             WHERE id = ?
             """,
             (
@@ -278,13 +260,10 @@ def get_invoice_status(invoice_id: str):
             )
         ).fetchone()
 
-
         if not row:
             return None
 
-
         return row["status"]
-
 
 
 def mark_invoice_as_paid(invoice_id: str) -> bool:
@@ -297,8 +276,8 @@ def mark_invoice_as_paid(invoice_id: str) -> bool:
 
         cursor = connection.execute(
             """
-            UPDATE invoices 
-            SET status = 'paid' 
+            UPDATE invoices
+            SET status = 'paid'
             WHERE id = ? AND status = 'pending'
             """,
             (
@@ -308,26 +287,22 @@ def mark_invoice_as_paid(invoice_id: str) -> bool:
 
         connection.commit()
 
-
         return cursor.rowcount > 0
+
 
 def delete_old_pending_invoices():
     """Удаляет из базы все инвойсы в статусе 'pending', созданные ранее установленного порога."""
-    import time
-    
-    # Вычитаем порог времени из текущего Unix-timestamp
     expire_time = int(time.time()) - INVOICE_CLEAN_THRESHOLD
-    
+
     with get_paid_connection() as connection:
         connection.execute(
             """
-            DELETE FROM invoices 
+            DELETE FROM invoices
             WHERE status = 'pending' AND created_at < ?
             """,
             (expire_time,)
         )
         connection.commit()
-
 
 
 def add_paid_attempts(
@@ -362,9 +337,7 @@ def add_paid_attempts(
             )
         )
 
-
         connection.commit()
-
 
 
 def get_paid_attempts(
@@ -386,13 +359,10 @@ def get_paid_attempts(
             )
         ).fetchone()
 
-
         if not row:
             return 0
 
-
         return row["attempts"]
-
 
 
 def use_paid_attempt(
@@ -414,12 +384,8 @@ def use_paid_attempt(
             )
         ).fetchone()
 
-
         if not row or row["attempts"] <= 0:
-
             return False
-
-
 
         connection.execute(
             """
@@ -435,13 +401,9 @@ def use_paid_attempt(
             )
         )
 
-
         connection.commit()
 
-
         return True
-
-
 
 
 # ============================================================
@@ -460,7 +422,6 @@ def drink_paid(
         random.randint(1, 50) / 10,
         2
     )
-
 
     with get_connection(chat_id) as connection:
 
@@ -499,7 +460,6 @@ def drink_paid(
             )
         )
 
-
         total = connection.execute(
             """
             SELECT total_liters
@@ -514,220 +474,110 @@ def drink_paid(
             )
         ).fetchone()[0]
 
-
-
     return amount, float(total)
+
 
 # =====================================
 # PROMO DATABASE
 # =====================================
 
-import sqlite3
-from datetime import datetime
-
-
 PROMO_DB = "sqlite3/promo.sqlite3"
 
 
-# =====================================
-# Подключение
-# =====================================
-
 def promo_connect():
+    return sqlite3.connect(PROMO_DB)
 
-    return sqlite3.connect(
-        PROMO_DB
-    )
-
-
-# =====================================
-# Создание таблиц
-# =====================================
 
 def create_promo_database():
-
     db = promo_connect()
     cursor = db.cursor()
 
-
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS promocodes (
-
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-
         code TEXT UNIQUE NOT NULL,
-
         reward_type TEXT,
-
         reward_amount INTEGER DEFAULT 0,
-
-
         time_limited INTEGER DEFAULT 0,
-
         expires_at TEXT,
-
         duration TEXT,
-
-
         activation_limited INTEGER DEFAULT 0,
-
         max_activations INTEGER,
-
         used_count INTEGER DEFAULT 0,
-
-
-        bind_user INTEGER,
-
-
+        bind_users TEXT,
         created_by INTEGER,
-
         created_at TEXT,
-
         updated_at TEXT,
-
-
         active INTEGER DEFAULT 1
     )
     """)
 
-
-
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS promo_uses (
-
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-
         promo_id INTEGER,
-
         user_id INTEGER,
-
         used_at TEXT
     )
     """)
 
-
     db.commit()
     db.close()
 
 
-
-# =====================================
-# Создание промокода
-# =====================================
-
-
 def create_promo(data):
-
     db = promo_connect()
     cursor = db.cursor()
 
+    now = datetime.now().strftime("%d.%m.%Y %H:%M")
 
-    now = datetime.now().strftime(
-        "%d.%m.%Y %H:%M"
-    )
-
+    bind_users = data.get("bind_users")
+    if isinstance(bind_users, list):
+        bind_users = ",".join(str(uid) for uid in bind_users)
+    elif bind_users:
+        bind_users = str(bind_users)
 
     cursor.execute(
         """
         INSERT INTO promocodes (
-
             code,
-
             reward_type,
             reward_amount,
-
             time_limited,
             expires_at,
             duration,
-
             activation_limited,
             max_activations,
-
-            bind_user,
-
+            bind_users,
             created_by,
-
             created_at,
             updated_at
-
         )
-
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-
         """,
-
         (
-
             data["name"],
-
-
-            data.get(
-                "reward_type"
-            ),
-
-            data.get(
-                "reward_amount",
-                0
-            ),
-
-
-            data.get(
-                "time_limited",
-                0
-            ),
-
-            data.get(
-                "expires_at"
-            ),
-
-            data.get(
-                "duration"
-            ),
-
-
-            data.get(
-                "activation_limited",
-                0
-            ),
-
-            data.get(
-                "max_activations"
-            ),
-
-
-            data.get(
-                "bind_user"
-            ),
-
-
-            data.get(
-                "created_by"
-            ),
-
-
+            data.get("reward_type"),
+            data.get("reward_amount", 0),
+            data.get("time_limited", 0),
+            data.get("expires_at"),
+            data.get("duration"),
+            data.get("activation_limited", 0),
+            data.get("max_activations"),
+            bind_users,
+            data.get("created_by"),
             now,
-
             now
-
         )
     )
-
 
     db.commit()
     db.close()
 
 
-
-# =====================================
-# Получение одного промокода
-# =====================================
-
-
 def get_promo(code):
-
     db = promo_connect()
     cursor = db.cursor()
-
 
     cursor.execute(
         """
@@ -738,267 +588,340 @@ def get_promo(code):
         (code,)
     )
 
-
     result = cursor.fetchone()
-
-
     db.close()
-
 
     return result
 
 
-
-# =====================================
-# Получение всех промокодов
-# =====================================
-
-
-def get_all_promos():
+def get_all_promos_page(page=1, limit=10):
+    offset = (page - 1) * limit
 
     db = promo_connect()
     cursor = db.cursor()
-
 
     cursor.execute(
         """
         SELECT *
         FROM promocodes
-        WHERE active = 1
-        ORDER BY id DESC
-        """
-    )
-
-
-    result = cursor.fetchall()
-
-
-    db.close()
-
-
-    return result
-
-
-
-# =====================================
-# Пагинация промокодов
-# =====================================
-
-
-def get_promos_page(page=1, limit=10):
-
-
-    offset = (
-        page - 1
-    ) * limit
-
-
-    db = promo_connect()
-    cursor = db.cursor()
-
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM promocodes
-
-        WHERE active = 1
-
-        ORDER BY id DESC
-
-        LIMIT ?
-        OFFSET ?
-
+        ORDER BY active ASC, id DESC
+        LIMIT ? OFFSET ?
         """,
-
-        (
-            limit,
-            offset
-        )
+        (limit, offset)
     )
 
-
     result = cursor.fetchall()
-
-
     db.close()
-
 
     return result
 
-
-
-def get_promos_count():
+def get_active_promos_page(page=1, limit=10):
+    offset = (page - 1) * limit
 
     db = promo_connect()
     cursor = db.cursor()
 
+    cursor.execute(
+        """
+        SELECT *
+        FROM promocodes
+        WHERE active = 1
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset)
+    )
+
+    result = cursor.fetchall()
+    db.close()
+
+    return result
+
+
+def get_active_promos_count():
+    db = promo_connect()
+    cursor = db.cursor()
 
     cursor.execute(
         """
         SELECT COUNT(*)
         FROM promocodes
-
         WHERE active = 1
         """
     )
 
-
     count = cursor.fetchone()[0]
-
-
     db.close()
-
 
     return count
 
 
-
-# =====================================
-# Изменение промокода
-# =====================================
-
-
-def update_promo(code, data):
+def get_all_promos_page(page=1, limit=10):
+    offset = (page - 1) * limit
 
     db = promo_connect()
     cursor = db.cursor()
 
-
-    now = datetime.now().strftime(
-        "%d.%m.%Y %H:%M"
+    cursor.execute(
+        """
+        SELECT *
+        FROM promocodes
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset)
     )
 
+    result = cursor.fetchall()
+    db.close()
+
+    return result
+
+
+def get_all_promos_count():
+    db = promo_connect()
+    cursor = db.cursor()
 
     cursor.execute(
         """
-
-        UPDATE promocodes
-
-        SET
-
-        reward_type = ?,
-
-        reward_amount = ?,
-
-        time_limited = ?,
-
-        expires_at = ?,
-
-        duration = ?,
-
-        activation_limited = ?,
-
-        max_activations = ?,
-
-        bind_user = ?,
-
-        updated_at = ?
-
-
-        WHERE code = ?
-
-        """,
-
-        (
-
-            data.get(
-                "reward_type"
-            ),
-
-            data.get(
-                "reward_amount",
-                0
-            ),
-
-            data.get(
-                "time_limited",
-                0
-            ),
-
-            data.get(
-                "expires_at"
-            ),
-
-            data.get(
-                "duration"
-            ),
-
-            data.get(
-                "activation_limited",
-                0
-            ),
-
-            data.get(
-                "max_activations"
-            ),
-
-            data.get(
-                "bind_user"
-            ),
-
-            now,
-
-            code
-
-        )
+        SELECT COUNT(*)
+        FROM promocodes
+        """
     )
 
+    count = cursor.fetchone()[0]
+    db.close()
+
+    return count
+
+
+def get_promos_page(page=1, limit=10):
+    return get_active_promos_page(page, limit)
+
+
+def get_promos_count():
+    return get_active_promos_count()
+
+
+def update_promo(code, data):
+    db = promo_connect()
+    cursor = db.cursor()
+
+    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    bind_users = data.get("bind_users")
+    if isinstance(bind_users, list):
+        bind_users = ",".join(str(uid) for uid in bind_users)
+    elif bind_users:
+        bind_users = str(bind_users)
+
+    cursor.execute(
+        """
+        UPDATE promocodes
+        SET
+        code = ?,
+        reward_type = ?,
+        reward_amount = ?,
+        time_limited = ?,
+        expires_at = ?,
+        duration = ?,
+        activation_limited = ?,
+        max_activations = ?,
+        bind_users = ?,
+        updated_at = ?
+        WHERE code = ?
+        """,
+        (
+            data.get("name"),
+            data.get("reward_type"),
+            data.get("reward_amount", 0),
+            data.get("time_limited", 0),
+            data.get("expires_at"),
+            data.get("duration"),
+            data.get("activation_limited", 0),
+            data.get("max_activations"),
+            bind_users,
+            now,
+            code
+        )
+    )
 
     db.commit()
     db.close()
 
 
-
-# =====================================
-# Удаление промокода
-# =====================================
-
-
 def delete_promo(code):
-
     db = promo_connect()
     cursor = db.cursor()
-
 
     cursor.execute(
         """
         DELETE FROM promo_uses
-
         WHERE promo_id = (
-
             SELECT id
             FROM promocodes
             WHERE code = ?
-
         )
-
         """,
-
         (code,)
     )
-
-
 
     cursor.execute(
         """
         DELETE FROM promocodes
-
         WHERE code = ?
-
         """,
-
         (code,)
     )
-
 
     db.commit()
     db.close()
 
 
+def has_used_promo(promo_id: int, user_id: int) -> bool:
+    """Проверяет, активировал ли пользователь этот промокод."""
+    db = promo_connect()
+    cursor = db.cursor()
 
-# =====================================
-# Инициализация
-# =====================================
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM promo_uses
+        WHERE promo_id = ? AND user_id = ?
+        """,
+        (promo_id, user_id)
+    )
+
+    count = cursor.fetchone()[0]
+    db.close()
+
+    return count > 0
+
+
+def use_promo(promo_id: int, user_id: int):
+    """Записывает использование промокода и проверяет, не исчерпан ли он."""
+    db = promo_connect()
+    cursor = db.cursor()
+
+    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    cursor.execute(
+        """
+        INSERT INTO promo_uses (promo_id, user_id, used_at)
+        VALUES (?, ?, ?)
+        """,
+        (promo_id, user_id, now)
+    )
+
+    cursor.execute(
+        """
+        UPDATE promocodes
+        SET used_count = used_count + 1
+        WHERE id = ?
+        """,
+        (promo_id,)
+    )
+
+    db.commit()
+    db.close()
+
+    if is_promo_exhausted(promo_id):
+        db = promo_connect()
+        cursor = db.cursor()
+        cursor.execute("SELECT code FROM promocodes WHERE id = ?", (promo_id,))
+        code = cursor.fetchone()[0]
+        db.close()
+
+        deactivate_promo(code)
+
+
+def is_promo_exhausted(promo_id: int) -> bool:
+    """Проверяет, активировали ли все привязанные пользователи промокод."""
+    db = promo_connect()
+    cursor = db.cursor()
+
+    cursor.execute(
+        """
+        SELECT bind_users, activation_limited, max_activations, used_count
+        FROM promocodes
+        WHERE id = ?
+        """,
+        (promo_id,)
+    )
+
+    promo = cursor.fetchone()
+
+    if not promo:
+        db.close()
+        return True
+
+    bind_users = promo[0]
+    activation_limited = promo[1]
+    max_activations = promo[2]
+    used_count = promo[3]
+
+    if activation_limited and used_count >= max_activations:
+        db.close()
+        return True
+
+    if bind_users:
+        user_ids = [int(uid.strip()) for uid in bind_users.split(",") if uid.strip()]
+
+        for uid in user_ids:
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM promo_uses
+                WHERE promo_id = ? AND user_id = ?
+                """,
+                (promo_id, uid)
+            )
+
+            if cursor.fetchone()[0] == 0:
+                db.close()
+                return False
+
+        db.close()
+        return True
+
+    db.close()
+    return False
+
+
+def deactivate_promo(code: str):
+    """Деактивирует промокод."""
+    db = promo_connect()
+    cursor = db.cursor()
+
+    cursor.execute(
+        """
+        UPDATE promocodes
+        SET active = 0
+        WHERE code = ?
+        """,
+        (code,)
+    )
+
+    db.commit()
+    db.close()
+
+
+def add_beer_reward(chat_id: int, user_id: int, name: str, amount: float):
+    """Добавляет литры пива пользователю в чате."""
+    with get_connection(chat_id) as connection:
+        connection.execute(
+            """
+            INSERT INTO drinkers (user_id, name, total_liters)
+            VALUES (?, ?, ?)
+            
+            ON CONFLICT(user_id)
+            DO UPDATE SET
+            name = excluded.name,
+            total_liters = ROUND(drinkers.total_liters + excluded.total_liters, 2)
+            """,
+            (user_id, name, amount)
+        )
+        connection.commit()
+
 
 create_promo_database()

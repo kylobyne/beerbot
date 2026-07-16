@@ -8,16 +8,16 @@ from aiogram.types import (
     InlineKeyboardButton
 )
 from aiogram.filters import Command
+from aiogram.enums import ParseMode
 import re
 from datetime import datetime
 
 from messages import *
 import database
-from config import admins
+from config import admins, PROMOS_PER_PAGE
 
 router = Router()
 
-# Временное хранилище создания/редактирования промокодов
 promo_states = {}
 
 # =====================================
@@ -29,7 +29,7 @@ def is_admin(user_id: int):
 
 async def check_admin(callback):
     if not is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
+        await callback.answer(ADMIN_NO_ACCESS, show_alert=True)
         return False
     return True
 
@@ -38,65 +38,53 @@ async def check_admin(callback):
 # =====================================
 
 def validate_name(name: str) -> str | None:
-    """Проверка названия промокода: латиница + цифры, до 16 символов."""
     if not name:
-        return "Название не может быть пустым"
+        return VALIDATE_NAME_EMPTY
     
     if " " in name:
         return PROMO_NAME_SPACE_ERROR
     
     if len(name) > 16:
-        return "Название не должно превышать 16 символов"
+        return VALIDATE_NAME_TOO_LONG
     
     if not re.match(r'^[a-zA-Z0-9]+$', name):
-        return "Название должно содержать только латинские буквы и цифры"
+        return VALIDATE_NAME_INVALID_CHARS
     
     return None
 
 def validate_reward_amount(reward_type: str, amount_str: str) -> tuple[int | float | None, str | None]:
-    """
-    Проверяет количество награды.
-    Пиво: целое или дробное (до 2 знаков после точки).
-    Доп. попытки: целое число.
-    Возвращает (распарсенное_значение, ошибка).
-    """
     if not amount_str:
-        return None, "Введите количество"
+        return None, VALIDATE_REWARD_EMPTY
     
     try:
         if reward_type == "beer":
             amount = float(amount_str)
             if amount <= 0:
-                return None, "Количество пива должно быть положительным числом"
+                return None, VALIDATE_BEER_POSITIVE
             if '.' in amount_str and len(amount_str.split('.')[1]) > 2:
-                return None, "Допускается не более двух знаков после точки"
+                return None, VALIDATE_BEER_DECIMALS
             return amount, None
         
         elif reward_type == "attempts":
             if '.' in amount_str:
-                return None, "Количество попыток должно быть целым числом"
+                return None, VALIDATE_ATTEMPTS_INTEGER
             amount = int(amount_str)
             if amount <= 0:
-                return None, "Количество попыток должно быть положительным числом"
+                return None, VALIDATE_ATTEMPTS_POSITIVE
             return amount, None
         
         else:
-            return None, "Неизвестный тип награды"
+            return None, VALIDATE_REWARD_UNKNOWN
     
     except ValueError:
-        return None, "Введите корректное число"
+        return None, VALIDATE_REWARD_NUMBER
 
 def validate_time(duration: str) -> str | None:
-    """
-    Проверка формата времени.
-    ДД.ММ.ГГ, ДД.ММ.ГГГГ или 2h, 3h, 2h5s.
-    """
     if not duration:
-        return "Введите дату или длительность"
+        return VALIDATE_TIME_EMPTY
     
     duration = duration.strip()
     
-    # Формат ДД.ММ.ГГ или ДД.ММ.ГГГГ
     date_patterns = [
         r'^\d{2}\.\d{2}\.\d{2}$',
         r'^\d{2}\.\d{2}\.\d{4}$'
@@ -106,38 +94,40 @@ def validate_time(duration: str) -> str | None:
         if re.match(pattern, duration):
             try:
                 if len(duration.split('.')[2]) == 2:
-                    datetime.strptime(duration, "%d.%m.%y")
+                    parsed_date = datetime.strptime(duration, "%d.%m.%y")
                 else:
-                    datetime.strptime(duration, "%d.%m.%Y")
+                    parsed_date = datetime.strptime(duration, "%d.%m.%Y")
+                
+                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                if parsed_date < today:
+                    return VALIDATE_TIME_PAST_DATE
+                
                 return None
             except ValueError:
-                return "Некорректная дата"
+                return VALIDATE_TIME_INVALID_DATE
     
-    # Формат длительности
     duration_pattern = r'^(\d+h)?(\d+m)?(\d+s)?$'
     if re.match(duration_pattern, duration) and duration:
         if any(unit in duration for unit in ['h', 'm', 's']):
             return None
     
-    return "Неверный формат. Используйте ДД.ММ.ГГ или 2h, 3h, 2h5s"
+    return VALIDATE_TIME_INVALID_FORMAT
 
 def validate_activations(amount_str: str) -> tuple[int | None, str | None]:
-    """Проверка количества активаций: целое положительное число."""
     if not amount_str:
-        return None, "Введите количество активаций"
+        return None, VALIDATE_ACTIVATIONS_EMPTY
     
     try:
         if '.' in amount_str:
             return None, PROMO_NUMBER_ERROR
         amount = int(amount_str)
         if amount <= 0:
-            return None, "Количество активаций должно быть положительным числом"
+            return None, VALIDATE_ACTIVATIONS_POSITIVE
         return amount, None
     except ValueError:
         return None, PROMO_NUMBER_ERROR
 
 def validate_user_id(user_id_str: str) -> tuple[int | None, str | None]:
-    """Проверка Telegram user_id: целое число."""
     if not user_id_str:
         return None, PROMO_USER_ID_ERROR
     
@@ -158,19 +148,19 @@ def admin_keyboard():
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=BTN_CREATE_PROMO,
+                    text="Создание промокодов",
                     callback_data="promo_create"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text=BTN_SETTINGS_PROMO,
+                    text="Настройка промокодов",
                     callback_data="promo_settings"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text=BTN_DELETE_PROMO,
+                    text="Удаление промокодов",
                     callback_data="promo_delete"
                 )
             ]
@@ -182,7 +172,7 @@ def back_keyboard():
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text=BTN_BACK,
+                    text="Назад",
                     callback_data="promo_back",
                     icon_custom_emoji_id="5255964497608217438",
                     style="danger"
@@ -191,9 +181,21 @@ def back_keyboard():
         ]
     )
 
+def ok_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Ок",
+                    callback_data="admin_return",
+                    icon_custom_emoji_id="5256216509109272955",
+                    style="success"
+                )
+            ]
+        ]
+    )
+
 def final_keyboard(code, edit_mode=False):
-    """Клавиатура финального подтверждения."""
-    
     name_display = code.get('name', '—')
     
     reward_display = code.get('reward_type', '—')
@@ -206,10 +208,16 @@ def final_keyboard(code, edit_mode=False):
     
     limit_display = str(code.get('max_activations')) if code.get('activation_limited') else 'Без ограничений'
     
-    user_display = str(code.get('bind_user')) if code.get('bind_user') else 'Нет'
+    bind_users = code.get('bind_users', '')
+    if isinstance(bind_users, list):
+        user_display = ", ".join(str(uid) for uid in bind_users) if bind_users else 'Нет'
+    elif bind_users:
+        user_display = bind_users
+    else:
+        user_display = 'Нет'
     
     save_button = InlineKeyboardButton(
-        text=BTN_SAVE_CHANGES if edit_mode else BTN_SAVE,
+        text="Сохранить изменения" if edit_mode else "Сохранить промокод",
         callback_data="promo_save_changes" if edit_mode else "promo_save",
         icon_custom_emoji_id="5256216509109272955",
         style="success"
@@ -247,14 +255,14 @@ def final_keyboard(code, edit_mode=False):
             ],
             [
                 InlineKeyboardButton(
-                    text=f"Пользователь: {user_display}",
+                    text=f"Пользователи: {user_display}",
                     callback_data="edit_user",
                     icon_custom_emoji_id="5280472444287616361"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text=BTN_CANCEL,
+                    text="Отменить",
                     callback_data="promo_cancel",
                     icon_custom_emoji_id="5255933371980223131",
                     style="danger"
@@ -277,7 +285,8 @@ async def admin_panel(message: Message):
     
     await message.answer(
         ADMIN_PANEL,
-        reply_markup=admin_keyboard()
+        reply_markup=admin_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -293,7 +302,7 @@ async def create_promo(callback: CallbackQuery):
     
     promo_states[user_id] = {
         "edit": False,
-        "from_final": False,  # ← флаг: перешли ли из финального окна
+        "from_final": False,
         "step": "name",
         "name": None,
         "reward_type": None,
@@ -302,12 +311,13 @@ async def create_promo(callback: CallbackQuery):
         "time_limited": 0,
         "max_activations": None,
         "activation_limited": 0,
-        "bind_user": None
+        "bind_users": None
     }
     
     await callback.message.edit_text(
         PROMO_ENTER_NAME,
-        reply_markup=back_keyboard()
+        reply_markup=back_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -323,13 +333,13 @@ async def edit_name(callback: CallbackQuery):
     if user_id not in promo_states:
         return
     
-    # Устанавливаем флаг — пришли из финального окна
     promo_states[user_id]["from_final"] = True
     promo_states[user_id]["step"] = "name"
     
     await callback.message.edit_text(
         PROMO_ENTER_NAME,
-        reply_markup=back_keyboard()
+        reply_markup=back_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "edit_reward")
@@ -360,14 +370,15 @@ async def edit_reward(callback: CallbackQuery):
                 ],
                 [
                     InlineKeyboardButton(
-                        text=BTN_BACK,
+                        text="Назад",
                         callback_data="promo_back",
                         icon_custom_emoji_id="5255964497608217438",
                         style="danger"
                     )
                 ]
             ]
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "edit_time")
@@ -398,14 +409,15 @@ async def edit_time(callback: CallbackQuery):
                 ],
                 [
                     InlineKeyboardButton(
-                        text=BTN_BACK,
+                        text="Назад",
                         callback_data="promo_back",
                         icon_custom_emoji_id="5255964497608217438",
                         style="danger"
                     )
                 ]
             ]
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "edit_limit")
@@ -436,14 +448,15 @@ async def edit_limit(callback: CallbackQuery):
                 ],
                 [
                     InlineKeyboardButton(
-                        text=BTN_BACK,
+                        text="Назад",
                         callback_data="promo_back",
                         icon_custom_emoji_id="5255964497608217438",
                         style="danger"
                     )
                 ]
             ]
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "edit_user")
@@ -459,7 +472,7 @@ async def edit_user(callback: CallbackQuery):
     promo_states[user_id]["step"] = "bind"
     
     await callback.message.edit_text(
-        PROMO_BIND_USER,
+        "Введите Telegram user_id пользователей через запятую\nНапример: 123456, 789012",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -474,14 +487,15 @@ async def edit_user(callback: CallbackQuery):
                 ],
                 [
                     InlineKeyboardButton(
-                        text=BTN_BACK,
+                        text="Назад",
                         callback_data="promo_back",
                         icon_custom_emoji_id="5255964497608217438",
                         style="danger"
                     )
                 ]
             ]
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -503,13 +517,14 @@ async def reward_select(callback: CallbackQuery):
     promo_states[user_id]["step"] = "reward_amount"
     
     if reward == "beer":
-        prompt = "Введите количество литров пива\n(целое или дробное число, до 2 знаков после точки):"
+        prompt = PROMPT_BEER_AMOUNT
     else:
-        prompt = "Введите количество дополнительных попыток\n(целое число):"
+        prompt = PROMPT_ATTEMPTS_AMOUNT
     
     await callback.message.edit_text(
         prompt,
-        reply_markup=back_keyboard()
+        reply_markup=back_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -518,8 +533,6 @@ async def reward_select(callback: CallbackQuery):
 
 @router.message()
 async def promo_input(message: Message):
-    """Обработка текстового ввода на разных шагах."""
-    
     if message.chat.type != "private":
         return
     
@@ -535,22 +548,19 @@ async def promo_input(message: Message):
     from_final = state.get("from_final", False)
     edit_mode = state.get("edit", False)
     
-    # ========== Шаг: ввод названия ==========
     if state["step"] == "name":
         error = validate_name(text)
         if error:
-            await message.answer(error)
+            await message.answer(error, parse_mode=ParseMode.HTML)
             return
         
         state["name"] = text
         
-        # Если пришли из финального окна (создание или редактирование) — возвращаемся назад
         if from_final or edit_mode:
             state["from_final"] = False
             await show_final(message, user_id)
             return
         
-        # Иначе — продолжаем по шагам создания
         state["step"] = "reward"
         
         await message.answer(
@@ -569,35 +579,33 @@ async def promo_input(message: Message):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
         return
     
-    # ========== Шаг: ввод количества награды ==========
     if state["step"] == "reward_amount":
         reward_type = state.get("reward_type")
         amount, error = validate_reward_amount(reward_type, text)
         
         if error:
-            await message.answer(error)
+            await message.answer(error, parse_mode=ParseMode.HTML)
             return
         
         state["reward_amount"] = amount
         
-        # Если пришли из финального окна — возвращаемся
         if from_final or edit_mode:
             state["from_final"] = False
             await show_final(message, user_id)
             return
         
-        # Иначе — продолжаем
         state["step"] = "time"
         
         await message.answer(
@@ -616,33 +624,31 @@ async def promo_input(message: Message):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
         return
     
-    # ========== Шаг: ввод времени ==========
     if state["step"] == "duration":
         error = validate_time(text)
         if error:
-            await message.answer(error)
+            await message.answer(error, parse_mode=ParseMode.HTML)
             return
         
         state["duration"] = text
         
-        # Если пришли из финального окна — возвращаемся
         if from_final or edit_mode:
             state["from_final"] = False
             await show_final(message, user_id)
             return
         
-        # Иначе — продолжаем
         state["step"] = "activation"
         
         await message.answer(
@@ -661,33 +667,31 @@ async def promo_input(message: Message):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
         return
     
-    # ========== Шаг: ввод количества активаций ==========
     if state["step"] == "activations":
         amount, error = validate_activations(text)
         if error:
-            await message.answer(error)
+            await message.answer(error, parse_mode=ParseMode.HTML)
             return
         
         state["max_activations"] = amount
         
-        # Если пришли из финального окна — возвращаемся
         if from_final or edit_mode:
             state["from_final"] = False
             await show_final(message, user_id)
             return
         
-        # Иначе — продолжаем
         state["step"] = "bind"
         
         await message.answer(
@@ -706,28 +710,32 @@ async def promo_input(message: Message):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
         return
     
-    # ========== Шаг: ввод user_id для привязки ==========
     if state["step"] == "user":
-        user_id_bind, error = validate_user_id(text)
-        if error:
-            await message.answer(error)
-            return
+        user_ids = []
+        for part in text.split(","):
+            part = part.strip()
+            if part:
+                uid, error = validate_user_id(part)
+                if error:
+                    await message.answer(error, parse_mode=ParseMode.HTML)
+                    return
+                user_ids.append(uid)
         
-        state["bind_user"] = user_id_bind
+        state["bind_users"] = user_ids
         state["from_final"] = False
         
-        # Всегда возвращаемся в финальное окно
         await show_final(message, user_id)
 
 # =====================================
@@ -738,18 +746,19 @@ async def show_final(message_or_callback, user_id):
     data = promo_states[user_id]
     edit_mode = data.get("edit", False)
     
-    # Сбрасываем флаг from_final при показе финального окна
     data["from_final"] = False
     
     if isinstance(message_or_callback, Message):
         await message_or_callback.answer(
             PROMO_FINAL.format(name=data["name"]),
-            reply_markup=final_keyboard(data, edit_mode)
+            reply_markup=final_keyboard(data, edit_mode),
+            parse_mode=ParseMode.HTML
         )
     else:
         await message_or_callback.message.edit_text(
             PROMO_FINAL.format(name=data["name"]),
-            reply_markup=final_keyboard(data, edit_mode)
+            reply_markup=final_keyboard(data, edit_mode),
+            parse_mode=ParseMode.HTML
         )
 
 # =====================================
@@ -770,7 +779,8 @@ async def time_yes(callback: CallbackQuery):
     
     await callback.message.edit_text(
         PROMO_TIME_INPUT,
-        reply_markup=back_keyboard()
+        reply_markup=back_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "time_no")
@@ -786,13 +796,11 @@ async def time_no(callback: CallbackQuery):
     state["time_limited"] = 0
     state["duration"] = None
     
-    # Если редактирование или пришли из финала — сразу в финал
     if state.get("edit") or state.get("from_final"):
         state["from_final"] = False
         await show_final(callback, user_id)
         return
     
-    # Иначе — продолжаем по шагам
     state["step"] = "activation"
     
     await callback.message.edit_text(
@@ -811,14 +819,15 @@ async def time_no(callback: CallbackQuery):
                 ],
                 [
                     InlineKeyboardButton(
-                        text=BTN_BACK,
+                        text="Назад",
                         callback_data="promo_back",
                         icon_custom_emoji_id="5255964497608217438",
                         style="danger"
                     )
                 ]
             ]
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -836,7 +845,8 @@ async def activation_yes(callback: CallbackQuery):
     
     await callback.message.edit_text(
         PROMO_ACTIVATION_AMOUNT,
-        reply_markup=back_keyboard()
+        reply_markup=back_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "activation_no")
@@ -849,13 +859,11 @@ async def activation_no(callback: CallbackQuery):
     state["activation_limited"] = 0
     state["max_activations"] = None
     
-    # Если редактирование или пришли из финала — сразу в финал
     if state.get("edit") or state.get("from_final"):
         state["from_final"] = False
         await show_final(callback, user_id)
         return
     
-    # Иначе — продолжаем
     state["step"] = "bind"
     
     await callback.message.edit_text(
@@ -874,18 +882,19 @@ async def activation_no(callback: CallbackQuery):
                 ],
                 [
                     InlineKeyboardButton(
-                        text=BTN_BACK,
+                        text="Назад",
                         callback_data="promo_back",
                         icon_custom_emoji_id="5255964497608217438",
                         style="danger"
                     )
                 ]
             ]
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
-# Привязка пользователя
+# Привязка пользователей
 # =====================================
 
 @router.callback_query(F.data == "bind_yes")
@@ -898,7 +907,8 @@ async def bind_yes(callback: CallbackQuery):
     
     await callback.message.edit_text(
         PROMO_BIND_USER_INPUT,
-        reply_markup=back_keyboard()
+        reply_markup=back_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "bind_no")
@@ -907,29 +917,10 @@ async def bind_no(callback: CallbackQuery):
         return
     
     user_id = callback.from_user.id
-    promo_states[user_id]["bind_user"] = None
+    promo_states[user_id]["bind_users"] = None
     promo_states[user_id]["from_final"] = False
     
     await show_final(callback, user_id)
-
-# =====================================
-# Клавиатура "Ок" после сохранения
-# =====================================
-
-def ok_keyboard():
-    """Клавиатура с кнопкой Ок для возврата в админ-панель."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Ок",
-                    callback_data="admin_return",
-                    icon_custom_emoji_id="5256216509109272955",
-                    style="success"
-                )
-            ]
-        ]
-    )
 
 # =====================================
 # Сохранение промокода
@@ -947,18 +938,12 @@ async def save_promo(callback: CallbackQuery):
     data = promo_states[user_id]
     
     if not data.get("name") or not data.get("reward_type"):
-        await callback.answer(
-            "Заполните все обязательные поля",
-            show_alert=True
-        )
+        await callback.answer(SAVE_ERROR_EMPTY_FIELDS, show_alert=True)
         return
     
     existing = database.get_promo(data["name"])
     if existing:
-        await callback.answer(
-            "Промокод с таким названием уже существует",
-            show_alert=True
-        )
+        await callback.answer(SAVE_ERROR_DUPLICATE, show_alert=True)
         return
     
     database.create_promo(data)
@@ -966,7 +951,8 @@ async def save_promo(callback: CallbackQuery):
     
     await callback.message.edit_text(
         PROMO_SAVED,
-        reply_markup=ok_keyboard()
+        reply_markup=ok_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "promo_save_changes")
@@ -981,10 +967,7 @@ async def save_changes(callback: CallbackQuery):
     data = promo_states[user_id]
     
     if not data.get("reward_type"):
-        await callback.answer(
-            "Заполните все обязательные поля",
-            show_alert=True
-        )
+        await callback.answer(SAVE_ERROR_EMPTY_FIELDS, show_alert=True)
         return
     
     database.update_promo(data["old_code"], data)
@@ -992,8 +975,10 @@ async def save_changes(callback: CallbackQuery):
     
     await callback.message.edit_text(
         PROMO_UPDATED,
-        reply_markup=ok_keyboard()
+        reply_markup=ok_keyboard(),
+        parse_mode=ParseMode.HTML
     )
+
 # =====================================
 # Отмена создания
 # =====================================
@@ -1009,7 +994,8 @@ async def cancel_promo(callback: CallbackQuery):
     
     await callback.message.edit_text(
         PROMO_CANCELLED,
-        reply_markup=admin_keyboard()
+        reply_markup=admin_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -1018,12 +1004,6 @@ async def cancel_promo(callback: CallbackQuery):
 
 @router.callback_query(F.data == "promo_back")
 async def promo_back(callback: CallbackQuery):
-    """
-    Кнопка Назад.
-    - Если from_final=True или edit=True — возвращает в финальное окно.
-    - Если шаг "name" при создании — возвращает в админ-панель.
-    - Иначе — возвращает на предыдущий шаг создания.
-    """
     if not await check_admin(callback):
         return
     
@@ -1036,22 +1016,19 @@ async def promo_back(callback: CallbackQuery):
     edit_mode = state.get("edit", False)
     from_final = state.get("from_final", False)
     
-    # Если редактирование или пришли из финала — всегда в финальное окно
     if edit_mode or from_final:
         state["from_final"] = False
         await show_final(callback, user_id)
         return
     
-    # ========== Особый случай: шаг "name" при создании — возврат в админ-панель ==========
     if current_step == "name" and not edit_mode:
         del promo_states[user_id]
         await callback.message.edit_text(
             PROMO_CANCELLED,
-            reply_markup=admin_keyboard()
+            reply_markup=admin_keyboard(),
+            parse_mode=ParseMode.HTML
         )
         return
-    
-    # ========== При создании: возврат на шаг назад ==========
     
     if current_step in ("user",):
         state["step"] = "bind"
@@ -1071,14 +1048,15 @@ async def promo_back(callback: CallbackQuery):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
     
     elif current_step == "bind":
@@ -1099,14 +1077,15 @@ async def promo_back(callback: CallbackQuery):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
     
     elif current_step == "activations":
@@ -1127,14 +1106,15 @@ async def promo_back(callback: CallbackQuery):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
     
     elif current_step == "activation":
@@ -1155,14 +1135,15 @@ async def promo_back(callback: CallbackQuery):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
     
     elif current_step == "duration":
@@ -1183,14 +1164,15 @@ async def promo_back(callback: CallbackQuery):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
     
     elif current_step == "time":
@@ -1198,13 +1180,14 @@ async def promo_back(callback: CallbackQuery):
         
         reward_type = state.get("reward_type", "beer")
         if reward_type == "beer":
-            prompt = "Введите количество литров пива\n(целое или дробное число, до 2 знаков после точки):"
+            prompt = PROMPT_BEER_AMOUNT
         else:
-            prompt = "Введите количество дополнительных попыток\n(целое число):"
+            prompt = PROMPT_ATTEMPTS_AMOUNT
         
         await callback.message.edit_text(
             prompt,
-            reply_markup=back_keyboard()
+            reply_markup=back_keyboard(),
+            parse_mode=ParseMode.HTML
         )
     
     elif current_step == "reward_amount":
@@ -1225,43 +1208,49 @@ async def promo_back(callback: CallbackQuery):
                     ],
                     [
                         InlineKeyboardButton(
-                            text=BTN_BACK,
+                            text="Назад",
                             callback_data="promo_back",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
     
     elif current_step == "reward":
         state["step"] = "name"
         await callback.message.edit_text(
             PROMO_ENTER_NAME,
-            reply_markup=back_keyboard()
+            reply_markup=back_keyboard(),
+            parse_mode=ParseMode.HTML
         )
     
     else:
-        # Защита: если что-то пошло не так — возврат в админ-панель
         del promo_states[user_id]
         await callback.message.edit_text(
             PROMO_CANCELLED,
-            reply_markup=admin_keyboard()
+            reply_markup=admin_keyboard(),
+            parse_mode=ParseMode.HTML
         )
+
 # =====================================
 # Список промокодов (пагинация)
 # =====================================
-
-PROMOS_PER_PAGE = 10
 
 def promo_list_keyboard(promos, page, total_pages, mode):
     buttons = []
     row = []
     
     for promo in promos:
+        if mode == "delete" and not promo[14]:
+            display_text = f"{promo[1]} (НР)"
+        else:
+            display_text = promo[1]
+        
         button = InlineKeyboardButton(
-            text=promo[1],
+            text=display_text,
             callback_data=f"{mode}_select:{promo[1]}"
         )
         row.append(button)
@@ -1305,7 +1294,7 @@ def promo_list_keyboard(promos, page, total_pages, mode):
     buttons.append(
         [
             InlineKeyboardButton(
-                text=BTN_RETURN,
+                text="ВЕРНУТЬСЯ",
                 callback_data="admin_return",
                 icon_custom_emoji_id="5255964497608217438",
                 style="danger"
@@ -1316,8 +1305,13 @@ def promo_list_keyboard(promos, page, total_pages, mode):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 async def show_promo_list(callback, page, mode):
-    promos = database.get_promos_page(page, PROMOS_PER_PAGE)
-    total = database.get_promos_count()
+    if mode == "settings":
+        promos = database.get_active_promos_page(page, PROMOS_PER_PAGE)
+        total = database.get_active_promos_count()
+    else:
+        promos = database.get_all_promos_page(page, PROMOS_PER_PAGE)
+        total = database.get_all_promos_count()
+    
     total_pages = max(1, (total + PROMOS_PER_PAGE - 1) // PROMOS_PER_PAGE)
     
     if not promos:
@@ -1327,14 +1321,15 @@ async def show_promo_list(callback, page, mode):
                 inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text=BTN_RETURN,
+                            text="ВЕРНУТЬСЯ",
                             callback_data="admin_return",
                             icon_custom_emoji_id="5255964497608217438",
                             style="danger"
                         )
                     ]
                 ]
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
         return
     
@@ -1342,7 +1337,8 @@ async def show_promo_list(callback, page, mode):
     
     await callback.message.edit_text(
         text,
-        reply_markup=promo_list_keyboard(promos, page, total_pages, mode)
+        reply_markup=promo_list_keyboard(promos, page, total_pages, mode),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -1387,7 +1383,7 @@ async def settings_select(callback: CallbackQuery):
         "duration": promo[6],
         "activation_limited": promo[7],
         "max_activations": promo[8],
-        "bind_user": promo[10]
+        "bind_users": promo[10]
     }
     
     await callback.message.edit_text(
@@ -1395,7 +1391,8 @@ async def settings_select(callback: CallbackQuery):
         reply_markup=final_keyboard(
             promo_states[callback.from_user.id],
             edit_mode=True
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -1430,20 +1427,21 @@ async def delete_select(callback: CallbackQuery):
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text=BTN_DELETE,
+                        text="Удалить",
                         callback_data=f"delete_confirm:{code}",
                         icon_custom_emoji_id="5445267414562389170",
                         style="danger"
                     ),
                     InlineKeyboardButton(
-                        text=BTN_BACK,
+                        text="Назад",
                         callback_data="delete_cancel",
                         icon_custom_emoji_id="5255964497608217438",
                         style="danger"
                     )
                 ]
             ]
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data.startswith("delete_confirm:"))
@@ -1459,20 +1457,21 @@ async def delete_confirm(callback: CallbackQuery):
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text=BTN_CONFIRM_DELETE,
+                        text="Точно уверен",
                         callback_data=f"delete_final:{code}",
                         style="success",
                         icon_custom_emoji_id="5454096630372379732"
                     ),
                     InlineKeyboardButton(
-                        text=BTN_BACK,
+                        text="Назад",
                         callback_data="delete_cancel",
                         icon_custom_emoji_id="5255964497608217438",
                         style="danger"
                     )
                 ]
             ]
-        )
+        ),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data.startswith("delete_final:"))
@@ -1485,7 +1484,8 @@ async def delete_final(callback: CallbackQuery):
     
     await callback.message.edit_text(
         PROMO_DELETED,
-        reply_markup=ok_keyboard()
+        reply_markup=ok_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 @router.callback_query(F.data == "delete_cancel")
@@ -1510,7 +1510,8 @@ async def admin_return(callback: CallbackQuery):
     
     await callback.message.edit_text(
         ADMIN_PANEL,
-        reply_markup=admin_keyboard()
+        reply_markup=admin_keyboard(),
+        parse_mode=ParseMode.HTML
     )
 
 # =====================================
@@ -1527,11 +1528,7 @@ async def none_callback(callback: CallbackQuery):
 
 @router.callback_query()
 async def handle_unknown_callback(callback: CallbackQuery):
-    """Отлавливает все неизвестные callback_data."""
     if not is_admin(callback.from_user.id):
         return
     
-    await callback.answer(
-        "Действие не распознано. Попробуйте снова.",
-        show_alert=True
-    )
+    await callback.answer(UNKNOWN_CALLBACK, show_alert=True)

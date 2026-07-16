@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from config import TOKEN, DB_CLEAN_INTERVAL
 from database import delete_old_pending_invoices
 # ШАГ 1: Добавляем admin в импорт (измените имя файла, если оно другое)
-from handlers import beer, buy, start, stats, admin
+from handlers import beer, buy, start, stats, admin, promo
 
 
 # Фоновая задача для периодической очистки базы данных
@@ -37,12 +37,13 @@ async def main():
     dp = Dispatcher()
 
     # ШАГ 2: Регистрируем админский роутер в диспетчере первым
-    dp.include_router(admin.router)
-    
+   
     dp.include_router(start.router)
     dp.include_router(beer.router)
     dp.include_router(buy.router)
     dp.include_router(stats.router)
+    dp.include_router(promo.router)
+    dp.include_router(admin.router)
 
     # Запускаем фоновую задачу
     asyncio.create_task(periodic_db_cleaner())

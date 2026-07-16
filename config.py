@@ -56,3 +56,4 @@ ALLOWED_STATUSES = ["creator", "administrator", "member", "restricted"]
 admins = [
     7697996660
 ]
+PROMOS_PER_PAGE = 10
