@@ -149,19 +149,25 @@ def admin_keyboard():
             [
                 InlineKeyboardButton(
                     text="Создание промокодов",
-                    callback_data="promo_create"
+                    callback_data="promo_create",
+                    style="success",
+                    icon_custom_emoji_id="5454096630372379732"
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="Настройка промокодов",
-                    callback_data="promo_settings"
+                    callback_data="promo_settings",
+                    style="primary",
+                    icon_custom_emoji_id="5283080550293211714"
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="Удаление промокодов",
-                    callback_data="promo_delete"
+                    callback_data="promo_delete",
+                    style="danger",
+                    icon_custom_emoji_id="5255933371980223131"
                 )
             ]
         ]
@@ -1436,7 +1442,7 @@ async def delete_select(callback: CallbackQuery):
                         text="Назад",
                         callback_data="delete_cancel",
                         icon_custom_emoji_id="5255964497608217438",
-                        style="danger"
+                        style="success"
                     )
                 ]
             ]

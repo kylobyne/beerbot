@@ -51,8 +51,7 @@ INVOICE_CLEAN_THRESHOLD = 1800
 
 ALLOWED_STATUSES = ["creator", "administrator", "member", "restricted"]
 
-# config.py
-
+#замените на свой user_id - доступ к админ панели
 admins = [
     7697996660
 ]

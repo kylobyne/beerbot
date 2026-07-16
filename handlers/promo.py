@@ -140,7 +140,7 @@ async def activate_promo(message: Message):
         database.add_paid_attempts(user_id, reward_amount)
         
         await message.answer(
-            PROMO_ACTIVATED + f"\n\n+{reward_amount} доп. попыток",
+            PROMO_ACTIVATED + f"\n\n{reward_amount} доп. попыток",
             parse_mode=ParseMode.HTML
         )
 
