@@ -1,126 +1,320 @@
-# 🍺 Beer Bot - Telegram Бот для Выпивания
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>README.md - Beer Bot</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #24292e;
+            background: #ffffff;
+        }
+        h1 { font-size: 2.25em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+        h2 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+        h3 { font-size: 1.25em; }
+        h4 { font-size: 1em; }
+        code {
+            background: #f6f8fa;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 85%;
+        }
+        pre {
+            background: #f6f8fa;
+            padding: 16px;
+            border-radius: 6px;
+            overflow: auto;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 85%;
+            line-height: 1.45;
+        }
+        pre code {
+            background: transparent;
+            padding: 0;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+        th, td {
+            border: 1px solid #dfe2e5;
+            padding: 6px 13px;
+            text-align: left;
+        }
+        th { background: #f6f8fa; font-weight: 600; }
+        blockquote {
+            border-left: 4px solid #dfe2e5;
+            padding: 0 15px;
+            color: #6a737d;
+            margin: 16px 0;
+        }
+        ul, ol { padding-left: 2em; }
+        hr { border: 0; border-top: 1px solid #eaecef; margin: 24px 0; }
+        img { max-width: 100%; }
+        .badge {
+            display: inline-block;
+            padding: 0.2em 0.6em;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-right: 4px;
+            color: white;
+        }
+        .badge-python { background: #3776AB; }
+        .badge-aiogram { background: #2D9CDB; }
+        .badge-license { background: #28A745; }
+        .emoji { font-size: 1.2em; }
+        .center { text-align: center; }
+    </style>
+</head>
+<body>
 
-> Telegram бот для соревнований по выпиванию пива с поддержкой платных попыток и промокодов
+<h1>🍺 Beer Bot — Telegram бот с рейтингом выпитого пива</h1>
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
-[![aiogram](https://img.shields.io/badge/aiogram-3.x-green.svg)](https://docs.aiogram.dev/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p>Telegram-бот для групповых чатов, который позволяет пользователям виртуально «пить пиво», получать место в рейтинге и покупать дополнительные попытки через Telegram Stars.</p>
 
----
+<p>
+    <span class="badge badge-python">Python 3.8+</span>
+    <span class="badge badge-aiogram">aiogram 3.x</span>
+    <span class="badge badge-license">MIT License</span>
+</p>
 
-## 📋 Описание
+<hr>
 
-**Beer Bot** - это игровой Telegram бот, который позволяет участникам групп соревноваться в количестве выпитого пива. Каждый час участники могут "выпить" случайное количество пива (от 0.1 до 5.0 литров) и соревноваться в таблице лидеров.
+<h2>📋 Возможности</h2>
 
-### 🎯 Основные возможности
+<h3>🍺 Обычное питьё</h3>
 
-- 🍺 **Выпивание пива** - случайное количество от 0.1 до 5.0 литров раз в час
-- 🏆 **Таблица лидеров** - рейтинг самых "пьющих" участников с пагинацией
-- ⭐ **Платные попытки** - покупка дополнительных попыток за Telegram Stars
-- 🎁 **Промокоды** - гибкая система промокодов с различными наградами
-- 👑 **Админ-панель** - управление промокодами через интерфейс бота
-- 🛡️ **Защита от флуда** - кулдауны на команды и кнопки
+<p>Команда:</p>
 
----
+<pre><code>/beer</code></pre>
 
-## 🚀 Основные функции
+<p>После команды пользователь получает случайное количество виртуального пива (от 0.1 до 5.0 литров).</p>
 
-### Для пользователей
+<p><strong>Особенности:</strong></p>
+<ul>
+    <li>работает только в групповых чатах;</li>
+    <li>действует кулдаун между обычными попытками (1 час);</li>
+    <li>выпитые литры добавляются в рейтинг текущего чата;</li>
+    <li>время последнего питья сохраняется в базе.</li>
+</ul>
 
-| Команда | Описание |
-|---------|----------|
-| `/start` | Приветственное сообщение и справка |
-| `/beer` | Выпить пиво (раз в час) |
-| `/stats` | Показать таблицу лидеров |
-| `/buy` | Купить дополнительные попытки за Telegram Stars |
-| `/promo КОД` | Активировать промокод |
+<hr>
 
-### Для администраторов
+<h3>⭐ Дополнительные попытки</h3>
 
-| Команда | Описание |
-|---------|----------|
-| `/admin` | Открыть админ-панель |
+<p>Команда:</p>
 
-#### Админ-панель включает:
-- **Создание промокодов** - пошаговый мастер с настройкой награды, времени действия, лимитов
-- **Настройка промокодов** - редактирование существующих промокодов
-- **Удаление промокодов** - с двойным подтверждением
+<pre><code>/buy</code></pre>
 
----
+<p>Открывает меню покупки дополнительных попыток за Telegram Stars.</p>
 
-## 📁 Архитектура проекта
-```beerbot/
+<p><strong>Доступные товары</strong> (настраиваются в <code>config.py</code>):</p>
+
+<pre><code>BUY_OPTIONS = {
+    "5": {"attempts": 5, "stars": 15},
+    "10": {"attempts": 10, "stars": 20},
+    "15": {"attempts": 15, "stars": 25}
+}</code></pre>
+
+<p><strong>После успешной оплаты:</strong></p>
+<ul>
+    <li>пользователю начисляются дополнительные попытки;</li>
+    <li>попытки сохраняются глобально для всех чатов;</li>
+    <li>используется база <code>payd_attemps.sqlite3</code> - общая для всех чатов.</li>
+</ul>
+
+<hr>
+
+<h2>🎮 Логика дополнительных попыток</h2>
+
+<p>Когда пользователь использует <code>/beer</code>, бот проверяет:</p>
+
+<ol>
+    <li><strong>Есть ли обычная доступная попытка?</strong>
+        <ul>
+            <li>Если да → выпивает и обновляет <code>last_drink</code></li>
+        </ul>
+    </li>
+    <li><strong>Если действует кулдаун:</strong>
+        <ul>
+            <li>Проверяются купленные попытки</li>
+            <li>Если они есть → одна попытка списывается</li>
+            <li>Литры добавляются в рейтинг текущего чата</li>
+            <li>Время обычного питья (<code>last_drink</code>) <strong>НЕ</strong> изменяется</li>
+        </ul>
+    </li>
+</ol>
+
+<p><strong>Результат:</strong></p>
+<ul>
+    <li>Купленные попытки позволяют пить вне кулдауна</li>
+    <li>Рейтинг чата продолжает обновляться</li>
+    <li>Невозможно сбить обычный таймер</li>
+</ul>
+
+<hr>
+
+<h2>📊 Статистика</h2>
+
+<p>Команда:</p>
+
+<pre><code>/stats</code></pre>
+
+<p>Показывает рейтинг пользователей в текущем чате.</p>
+
+<p><strong>Возможности:</strong></p>
+<ul>
+    <li>сортировка по количеству литров (по убыванию);</li>
+    <li>постраничный вывод (20 записей на страницу);</li>
+    <li>inline-кнопки навигации ◀️ ▶️;</li>
+    <li>автоматическая фильтрация покинувших чат пользователей;</li>
+    <li>топ-3 с медальками 🥇🥈🥉.</li>
+</ul>
+
+<hr>
+
+<h2>🎁 Промокоды</h2>
+
+<p><strong>Для пользователей:</strong></p>
+
+<pre><code>/promo КОД</code></pre>
+
+<p>Активирует промокод и начисляет награду.</p>
+
+<p><strong>Для администраторов:</strong></p>
+
+<pre><code>/admin</code></pre>
+
+<p>Открывает админ-панель для управления промокодами.</p>
+
+<p><strong>Возможности админ-панели:</strong></p>
+<ul>
+    <li>Создание промокодов (пошаговый мастер)</li>
+    <li>Настройка существующих промокодов</li>
+    <li>Удаление промокодов (с двойным подтверждением)</li>
+</ul>
+
+<p><strong>Типы наград:</strong></p>
+<ul>
+    <li>Пиво (литры)</li>
+    <li>Дополнительные попытки</li>
+</ul>
+
+<p><strong>Ограничения промокодов:</strong></p>
+<ul>
+    <li>⏰ Временные (дата или длительность: <code>2h</code>, <code>3h</code>, <code>2h5s</code>)</li>
+    <li>🔢 Лимит активаций</li>
+    <li>👥 Привязка к конкретным пользователям</li>
+</ul>
+
+<hr>
+
+<h2>📁 Команды бота</h2>
+
+<table>
+    <thead>
+        <tr>
+            <th>Команда</th>
+            <th>Описание</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>/start</code></td>
+            <td>Информация о боте и справка</td>
+        </tr>
+        <tr>
+            <td><code>/beer</code></td>
+            <td>Выпить виртуальное пиво</td>
+        </tr>
+        <tr>
+            <td><code>/buy</code></td>
+            <td>Купить дополнительные попытки</td>
+        </tr>
+        <tr>
+            <td><code>/stats</code></td>
+            <td>Показать рейтинг</td>
+        </tr>
+        <tr>
+            <td><code>/promo КОД</code></td>
+            <td>Активировать промокод</td>
+        </tr>
+        <tr>
+            <td><code>/admin</code></td>
+            <td>Админ-панель (только для админов)</td>
+        </tr>
+    </tbody>
+</table>
+
+<hr>
+
+<h2>📁 Структура проекта</h2>
+
+<pre><code>beer/
+│
+├── bot.py                    # Запуск бота и фоновые задачи
+├── config.py                 # Все настройки
+├── database.py               # Работа с SQLite3
+├── messages.py               # Все текстовые сообщения
+│
 ├── handlers/
-│ ├── init.py
-│ ├── admin.py # Админ-панель и управление промокодами
-│ ├── beer.py # Основная механика выпивания
-│ ├── buy.py # Покупка попыток через Telegram Stars
-│ ├── Middleware.py # Анти-флуд для кнопок
-│ ├── promo.py # Активация промокодов
-│ ├── start.py # Приветствие и справка
-│ └── stats.py # Таблица лидеров с пагинацией
+│   ├── admin.py              # Админ-панель
+│   ├── beer.py               # Команда /beer
+│   ├── buy.py                # Покупки Telegram Stars
+│   ├── Middleware.py         # Анти-флуд
+│   ├── promo.py              # Команда /promo
+│   ├── start.py              # Команда /start
+│   └── stats.py              # Команда /stats
 │
 ├── sqlite3/
-│ ├── chat_*.sqlite3 # Базы данных для каждого чата
-│ ├── payd_attemps.sqlite3 # Платные попытки и инвойсы
-│ └── promo.sqlite3 # Промокоды
+│   ├── chat_&lt;id&gt;.sqlite3     # Базы отдельных чатов
+│   ├── payd_attemps.sqlite3  # Общая база платных попыток
+│   └── promo.sqlite3         # База промокодов
 │
-├── .venv/ # Виртуальное окружение
-├── bot.py # Точка входа в приложение
-├── config.py # Конфигурация и настройки
-├── database.py # Работа с SQLite3 базами данных
-├── messages.py # Все текстовые сообщения
-├── .env # Переменные окружения (токен)
-├── requirements.txt # Зависимости
-├── start.bat # Запуск на Windows
-└── .gitignore # Игнорируемые файлы```
+├── .venv/                    # Виртуальное окружение
+├── .env                      # Переменные окружения
+├── requirements.txt          # Зависимости
+├── start.bat                 # Запуск на Windows
+└── README.md</code></pre>
 
+<hr>
 
-### Назначение файлов
+<h2>🗄️ Базы данных</h2>
 
-```| Файл | Назначение |
-|------|------------|
-| `bot.py` | Точка входа, запуск бота и фоновых задач |
-| `config.py` | Все настройки: токен, товары, кулдауны, админы |
-| `database.py` | Работа с SQLite3: CRUD операции для всех БД |
-| `messages.py` | Все текстовые сообщения для пользователей |
-| `handlers/admin.py` | Админ-панель и управление промокодами |
-| `handlers/beer.py` | Механика выпивания (бесплатно/платно) |
-| `handlers/buy.py` | Покупка попыток через Telegram Stars |
-| `handlers/Middleware.py` | Анти-флуд для кнопок (кулдауны) |
-| `handlers/promo.py` | Активация промокодов пользователями |
-| `handlers/start.py` | Приветствие и справка |
-| `handlers/stats.py` | Таблица лидеров с пагинацией |
+<h3>База чата (<code>chat_&lt;chat_id&gt;.sqlite3</code>)</h3>
 
----
+<p>Каждый чат имеет свою SQLite базу для изоляции данных.</p>
 
-## 🗄️ Структура баз данных
-
-### 1. База чата (`chat_{id}.sqlite3`)
-
-Хранит статистику выпивания для каждого чата отдельно.
-
-```sql
-CREATE TABLE drinkers (
+<pre><code>CREATE TABLE drinkers (
     user_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     total_liters REAL NOT NULL DEFAULT 0,
     last_drink INTEGER NOT NULL DEFAULT 0
-);
+);</code></pre>
 
-Поля:
+<p><strong>Поля:</strong></p>
+<ul>
+    <li><code>user_id</code> - ID пользователя Telegram</li>
+    <li><code>name</code> - Имя пользователя</li>
+    <li><code>total_liters</code> - Всего выпито литров</li>
+    <li><code>last_drink</code> - Время последнего выпивания (timestamp)</li>
+</ul>
 
-user_id - ID пользователя Telegram
+<hr>
 
-name - Имя пользователя
+<h3>Общая база платных попыток (<code>payd_attemps.sqlite3</code>)</h3>
 
-total_liters - Всего выпито литров
+<p>Используется для хранения купленных попыток. Одна база для всех чатов.</p>
 
-last_drink - Время последнего выпивания (timestamp)
-
-2. База платежей (payd_attemps.sqlite3)
-Управляет платными попытками и защищает от дублирования платежей.
--- Платные попытки пользователей
+<pre><code>-- Платные попытки пользователей
 CREATE TABLE paid_attempts (
     user_id INTEGER PRIMARY KEY,
     attempts INTEGER NOT NULL DEFAULT 0
@@ -132,42 +326,26 @@ CREATE TABLE invoices (
     user_id INTEGER NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('pending', 'paid')),
     created_at INTEGER NOT NULL
-);
--- Платные попытки пользователей
-CREATE TABLE paid_attempts (
-    user_id INTEGER PRIMARY KEY,
-    attempts INTEGER NOT NULL DEFAULT 0
-);
+);</code></pre>
 
--- Инвойсы для отслеживания платежей
-CREATE TABLE invoices (
-    id TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'paid')),
-    created_at INTEGER NOT NULL
-);
-Таблица paid_attempts:
+<p><strong>Особенности:</strong></p>
+<ul>
+    <li>одна база для всех чатов;</li>
+    <li>попытки привязаны к Telegram <code>user_id</code>;</li>
+    <li>пользователь может использовать их в любом чате;</li>
+    <li>защита от дублирования платежей.</li>
+</ul>
 
-user_id - ID пользователя
+<hr>
 
-attempts - Количество доступных платных попыток
+<h3>База промокодов (<code>promo.sqlite3</code>)</h3>
 
-Таблица invoices:
+<p>Полноценная система управления промокодами.</p>
 
-id - Уникальный ID инвойса (UUID)
-
-user_id - ID пользователя
-
-status - Статус: pending (ожидает оплаты) или paid (оплачен)
-
-created_at - Время создания (timestamp)
-
-3. База промокодов (promo.sqlite3)
-Полноценная система управления промокодами.
-CREATE TABLE promocodes (
+<pre><code>CREATE TABLE promocodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT UNIQUE NOT NULL,
-    reward_type TEXT,         -- 'beer' или 'attempts'
+    reward_type TEXT,
     reward_amount INTEGER DEFAULT 0,
     time_limited INTEGER DEFAULT 0,
     expires_at TEXT,
@@ -175,7 +353,7 @@ CREATE TABLE promocodes (
     activation_limited INTEGER DEFAULT 0,
     max_activations INTEGER,
     used_count INTEGER DEFAULT 0,
-    bind_users TEXT,          -- ID пользователей через запятую
+    bind_users TEXT,
     created_by INTEGER,
     created_at TEXT,
     updated_at TEXT,
@@ -187,234 +365,178 @@ CREATE TABLE promo_uses (
     promo_id INTEGER,
     user_id INTEGER,
     used_at TEXT
-);
+);</code></pre>
 
-Таблица promocodes:
+<hr>
 
-code - Название промокода (уникальное)
+<h2>⚙️ Установка и запуск</h2>
 
-reward_type - Тип награды: beer (пиво) или attempts (попытки)
+<h3>1. Клонирование репозитория</h3>
 
-reward_amount - Количество награды
+<pre><code>git clone https://github.com/yourusername/beer-bot.git
+cd beer-bot</code></pre>
 
-time_limited - Ограничение по времени (0/1)
+<h3>2. Создание и активация виртуального окружения</h3>
 
-expires_at - Дата истечения (формат: ДД.ММ.ГГГГ ЧЧ:ММ)
+<p><strong>Windows:</strong></p>
+<pre><code>python -m venv .venv
+.venv\Scripts\activate</code></pre>
 
-duration - Длительность действия (формат: 2h, 3h, 2h5s)
+<p><strong>macOS/Linux:</strong></p>
+<pre><code>python3 -m venv .venv
+source .venv/bin/activate</code></pre>
 
-activation_limited - Ограничение по активациям (0/1)
+<h3>3. Установка зависимостей</h3>
 
-max_activations - Максимальное количество активаций
+<pre><code>pip install -r requirements.txt</code></pre>
 
-used_count - Сколько раз уже активирован
+<h3>4. Настройка окружения</h3>
 
-bind_users - Привязанные пользователи (ID через запятую)
+<p>Создайте файл <code>.env</code> в корне проекта:</p>
 
-created_by - ID создавшего админа
+<pre><code>BOT_TOKEN=ваш_токен_бота</code></pre>
 
-created_at - Дата создания
+<h3>5. Запуск бота</h3>
 
-updated_at - Дата обновления
+<pre><code>python bot.py</code></pre>
 
-active - Активен ли промокод (0/1)
+<p>Или используйте <code>start.bat</code> (Windows):</p>
 
-Таблица promo_uses:
+<pre><code>start.bat</code></pre>
 
-promo_id - ID промокода
+<hr>
 
-user_id - ID активировавшего пользователя
+<h2>🔧 Настройка товаров</h2>
 
-used_at - Дата активации
+<p>Все товары находятся в <code>config.py</code>:</p>
 
-⚙️ Установка и запуск
-1. Клонирование репозитория
-git clone https://github.com/yourusername/beer-bot.git
-cd beer-bot
+<pre><code>BUY_OPTIONS = {
+    "5": {"attempts": 5, "stars": 15},
+    "10": {"attempts": 10, "stars": 20},
+    "15": {"attempts": 15, "stars": 25}
+}</code></pre>
 
-2. Создание и активация виртуального окружения
-Windows:
-python -m venv .venv
-.venv\Scripts\activate
+<p>Чтобы добавить новый пакет, достаточно добавить новый элемент:</p>
 
-macOS/Linux:
-python3 -m venv .venv
-source .venv/bin/activate
-3. Установка зависимостей
-pip install -r requirements.txt
-4. Настройка окружения
-Создайте файл .env в корне проекта:
-BOT_TOKEN=ваш_токен_бота
-5. Запуск бота
-python bot.py
-Или используйте start.bat (Windows):
-start.bat
-🔧 Конфигурация (config.py)
-Основные настройки бота с пояснениями:
-# Товары для покупки
-BUY_OPTIONS = {
-    "5": {"attempts": 5, "stars": 15},    # 5 попыток за 15 звезд
-    "10": {"attempts": 10, "stars": 20},   # 10 попыток за 20 звезд
-    "15": {"attempts": 15, "stars": 25}    # 15 попыток за 25 звезд
-}
+<pre><code>"25": {
+    "attempts": 25,
+    "stars": 100
+}</code></pre>
 
-# Администраторы (список Telegram ID)
-admins = [
-    123456789,  # Замените на свой ID
-    987654321   # Можно добавить несколько админов
-]
+<p>После этого бот автоматически:</p>
+<ul>
+    <li>создаст новую кнопку в <code>/buy</code>;</li>
+    <li>создаст invoice Telegram Stars;</li>
+    <li>обработает покупку;</li>
+    <li>выдаст нужное количество попыток.</li>
+</ul>
 
-# Настройки кулдаунов
-COOLDOWN_SECONDS = 3600          # 1 час между бесплатными выпиваниями
-COOLDOWN_TIME = 5                # 5 секунд между покупками
-PAGINATION_COOLDOWN_SECONDS = 3  # 3 секунды между перелистыванием топа
+<hr>
 
-# Настройки инвойсов
-INVOICE_LIFETIME = 600           # 10 минут на оплату
-INVOICE_CLEAN_THRESHOLD = 1800   # 30 минут до очистки
-DB_CLEAN_INTERVAL = 3600         # Очистка БД раз в час
+<h2>🛡️ Безопасность покупок</h2>
 
-# Пагинация
-ROWS_PER_PAGE = 20               # Записей на страницу в таблице лидеров
-PROMOS_PER_PAGE = 10             # Промокодов на страницу в админ-панели
+<p>Попытки начисляются только после получения <code>successful_payment</code> от Telegram.</p>
 
-# Разрешенные статусы пользователей в чате
-ALLOWED_STATUSES = ["creator", "administrator", "member", "restricted"]
-🎮 Механика игры
-Бесплатные попытки
-Каждый пользователь может использовать /beer раз в час
+<p><strong>Защита от дублирования:</strong></p>
+<ul>
+    <li>Инвойс имеет статус <code>pending</code> → <code>paid</code></li>
+    <li>Один инвойс нельзя оплатить дважды</li>
+    <li>Проверка срока действия (10 минут)</li>
+    <li>Идемпотентность операций</li>
+</ul>
 
-Случайное количество пива: 0.1 - 5.0 литров (с шагом 0.1)
+<p><strong>Анти-флуд:</strong></p>
+<ul>
+    <li>5 секунд между покупками</li>
+    <li>3 секунды между перелистыванием страниц</li>
+    <li>1 час между бесплатными выпиваниями</li>
+</ul>
 
-Обновляется общая статистика и время последнего выпивания
+<hr>
 
-Платные попытки
-Можно купить через /buy за Telegram Stars
+<h2>🔄 Фоновые задачи</h2>
 
-Три тарифа: 5, 10 или 15 попыток
+<p>Бот автоматически очищает просроченные инвойсы:</p>
 
-Платные попытки НЕ обновляют таймер кулдауна
-
-Можно использовать сразу после бесплатной попытки
-
-Стоимость: от 15 до 25 звезд
-
-Система промокодов
-Награда: пиво (литры) или дополнительные попытки
-
-Ограничения:
-
-⏰ Временные (дата или длительность: 2h, 3h, 2h5s)
-
-🔢 Лимит активаций
-
-👥 Привязка к конкретным пользователям
-
-Автоматическая деактивация после исчерпания
-
-Защита от повторного использования одним пользователем
-
-🛡️ Безопасность и защита
-Анти-флуд (Middleware)
-5 секунд между нажатиями кнопок покупки (привязка к user_id)
-
-3 секунды между перелистыванием страниц таблицы лидеров (привязка к chat_id)
-
-1 час между бесплатными выпиваниями (проверка в БД)
-
-Платежи
-Защита от дублирования через статус инвойса (pending → paid)
-
-Проверка срока действия инвойса (10 минут)
-
-Идемпотентность операций - один инвойс нельзя оплатить дважды
-
-PreCheckoutQuery проверка перед оплатой
-
-Данные
-Отдельные БД для каждого чата (изоляция данных)
-
-Фильтрация покинувших чат пользователей при просмотре статистики
-
-Автоматическая очистка просроченных инвойсов (раз в час)
-
-HTML-эскейпинг имен пользователей (защита от XSS)
-
-📦 Зависимости
-aiogram>=3.0,<4.0        # Фреймворк для Telegram ботов
-python-dotenv>=1.0,<2.0  # Загрузка переменных окружения
-Все остальное - встроенные модули Python:
-
-sqlite3 - работа с базами данных
-
-datetime - работа с датами
-
-random - генерация случайных чисел
-
-time - работа с таймстемпами
-
-json - работа с JSON
-
-uuid - генерация уникальных ID
-
-re - регулярные выражения
-
-html - эскейпинг HTML
-
-math - математические операции
-
-asyncio - асинхронность
-
-🔄 Фоновые задачи
-Бот выполняет фоновую задачу для автоматической очистки базы данных:
-async def periodic_db_cleaner():
-    """Фоновое задание для очистки просроченных инвойсов"""
+<pre><code>async def periodic_db_cleaner():
     while True:
         delete_old_pending_invoices()
-        await asyncio.sleep(DB_CLEAN_INTERVAL)
-        Интервал: раз в час (настраивается в config.py)
+        await asyncio.sleep(DB_CLEAN_INTERVAL)</code></pre>
 
-Действие: удаление инвойсов со статусом pending, созданных более 30 минут назад
+<ul>
+    <li><strong>Интервал</strong>: раз в час</li>
+    <li><strong>Действие</strong>: удаление инвойсов со статусом <code>pending</code> старше 30 минут</li>
+</ul>
 
-Запуск: автоматически при старте бота
+<hr>
 
-🐛 Отладка и логирование
-Бот использует встроенное логирование Python:
-logging.basicConfig(
+<h2>📦 Зависимости</h2>
+
+<pre><code>aiogram>=3.0,&lt;4.0        # Фреймворк для Telegram ботов
+python-dotenv>=1.0,&lt;2.0  # Загрузка переменных окружения</code></pre>
+
+<p><strong>Встроенные модули Python:</strong></p>
+<ul>
+    <li><code>sqlite3</code> - работа с базами данных</li>
+    <li><code>datetime</code> - работа с датами</li>
+    <li><code>random</code> - генерация случайных чисел</li>
+    <li><code>time</code> - работа с таймстемпами</li>
+    <li><code>json</code> - работа с JSON</li>
+    <li><code>uuid</code> - генерация уникальных ID</li>
+    <li><code>re</code> - регулярные выражения</li>
+    <li><code>html</code> - эскейпинг HTML</li>
+    <li><code>math</code> - математические операции</li>
+    <li><code>asyncio</code> - асинхронность</li>
+</ul>
+
+<hr>
+
+<h2>🐛 Отладка и логирование</h2>
+
+<pre><code>logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-Для подавления избыточных логов aiogram:
-logging.getLogger("aiogram.event").setLevel(logging.WARNING)
-Уровни логирования:
+)</code></pre>
 
-INFO - основная информация
+<hr>
 
-WARNING - предупреждения
+<h2>🤝 Внесение вклада</h2>
 
-ERROR - ошибки
-🤝 Внесение вклада
-Форкните репозиторий
+<ol>
+    <li>Форкните репозиторий</li>
+    <li>Создайте ветку (<code>git checkout -b feature/amazing-feature</code>)</li>
+    <li>Зафиксируйте изменения (<code>git commit -m 'Add feature'</code>)</li>
+    <li>Отправьте изменения (<code>git push origin feature/amazing-feature</code>)</li>
+    <li>Откройте Pull Request</li>
+</ol>
 
-Создайте ветку для новой функции (git checkout -b feature/amazing-feature)
+<hr>
 
-Зафиксируйте изменения (git commit -m 'Add amazing feature')
+<h2>📄 Лицензия</h2>
 
-Отправьте изменения в ветку (git push origin feature/amazing-feature)
+<p>MIT License</p>
 
-Откройте Pull Request
+<hr>
 
-📄 Лицензия
-Этот проект распространяется под лицензией MIT. Подробнее см. в файле LICENSE.
+<h2>💬 Поддержка</h2>
 
-💬 Поддержка
-По всем вопросам обращайтесь в Telegram или создавайте Issue в репозитории.
+<p>По всем вопросам обращайтесь в <a href="https://t.me/yourusername">Telegram</a> или создавайте Issue в репозитории.</p>
 
-🌟 Благодарности
-aiogram - за отличный фреймворк
+<hr>
 
-Telegram - за поддержку Telegram Stars и инвойсов
+<h2>🌟 Благодарности</h2>
 
-Всех участников и пользователей бота 🍻
+<ul>
+    <li><a href="https://docs.aiogram.dev/">aiogram</a> - за отличный фреймворк</li>
+    <li>Telegram - за поддержку Telegram Stars и инвойсов</li>
+    <li>Всех участников и пользователей бота 🍻</li>
+</ul>
 
-<div align="center"> <sub>Сделано с ❤️ и 🍺</sub> </div> ```
+<hr>
+
+<div class="center">
+    <sub>Сделано с ❤️ и 🍺</sub>
+</div>
+
+</body>
+</html>
