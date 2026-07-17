@@ -107,3 +107,4 @@ REWARD_BEER = "Пиво"
 REWARD_ATTEMPTS = "Доп. попытки"
 VALIDATE_TIME_PAST_DATE = "Дата не может быть раньше сегодняшнего дня"
 PROMO_USAGE = '<tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji> <b>Вы не указали промокод!</b>\n\n>Используйте: /promo ПРОМОКОД'
+PROMO_NOT_FOUND = '<tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji><i> Промокод не найден</i>'

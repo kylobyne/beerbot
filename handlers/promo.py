@@ -43,9 +43,10 @@ async def activate_promo(message: Message):
     # Получаем промокод из базы
     promo = database.get_promo(promo_code)
     
+    # 1. Промокод вообще не существует
     if not promo:
         await message.answer(
-            PROMO_NOT_VALID,
+            PROMO_NOT_FOUND,   # <-- новое сообщение
             parse_mode=ParseMode.HTML
         )
         return
@@ -66,7 +67,7 @@ async def activate_promo(message: Message):
     bind_users = promo[10]
     active = promo[14]
     
-    # Проверка: промокод активен
+    # 2. Промокод деактивирован (вручную или автоматически)
     if not active:
         await message.answer(
             PROMO_NOT_VALID,
@@ -74,7 +75,7 @@ async def activate_promo(message: Message):
         )
         return
     
-    # Проверка: привязка к пользователям
+    # 3. Привязка к пользователям
     if bind_users:
         allowed_users = [int(uid.strip()) for uid in bind_users.split(",") if uid.strip()]
         if user_id not in allowed_users:
@@ -84,7 +85,7 @@ async def activate_promo(message: Message):
             )
             return
     
-    # Проверка: лимит активаций
+    # 4. Лимит активаций
     if activation_limited and used_count >= max_activations:
         await message.answer(
             PROMO_NOT_VALID,
@@ -92,7 +93,7 @@ async def activate_promo(message: Message):
         )
         return
     
-    # Проверка: время действия по expires_at (с поддержкой разных форматов)
+    # 5. Время действия по expires_at
     if time_limited and expires_at:
         if not is_expires_at_valid(expires_at):
             await message.answer(
@@ -101,7 +102,7 @@ async def activate_promo(message: Message):
             )
             return
     
-    # Проверка: время действия по длительности (duration) с поддержкой дней
+    # 6. Время действия по длительности (duration)
     if time_limited and duration:
         if not is_duration_valid(promo):
             await message.answer(
@@ -110,7 +111,7 @@ async def activate_promo(message: Message):
             )
             return
     
-    # Проверка: пользователь уже активировал этот промокод
+    # 7. Пользователь уже активировал этот промокод
     if database.has_used_promo(promo_id, user_id):
         await message.answer(
             PROMO_ALREADY_USED,
@@ -123,18 +124,13 @@ async def activate_promo(message: Message):
     
     # Выдача награды
     if reward_type == "beer":
-        # Добавляем пиво в таблицу drinkers чата
         database.add_beer_reward(chat_id, user_id, user_name, reward_amount)
-        
         await message.answer(
             PROMO_ACTIVATED + f"\n\n+{reward_amount} л. пива",
             parse_mode=ParseMode.HTML
         )
-    
     elif reward_type == "attempts":
-        # Добавляем попытки в paid_attempts
         database.add_paid_attempts(user_id, reward_amount)
-        
         await message.answer(
             PROMO_ACTIVATED + f"\n\n+{reward_amount} доп. попыток",
             parse_mode=ParseMode.HTML
@@ -145,96 +141,53 @@ async def activate_promo(message: Message):
 # =====================================
 
 def is_expires_at_valid(expires_at: str) -> bool:
-    """
-    Проверяет, действительна ли дата истечения.
-    Поддерживает форматы:
-    - ДД.ММ.ГГГГ ЧЧ:ММ
-    - ДД.ММ.ГГ ЧЧ:ММ
-    - ДД.ММ.ГГГГ (до конца дня)
-    - ДД.ММ.ГГ (до конца дня)
-    """
     if not expires_at:
         return False
-    
     try:
-        # Пробуем с временем (полный формат)
         expiry = datetime.strptime(expires_at, "%d.%m.%Y %H:%M")
         return datetime.now() <= expiry
     except ValueError:
         pass
-    
     try:
-        # Пробуем с временем (короткий год)
         expiry = datetime.strptime(expires_at, "%d.%m.%y %H:%M")
         return datetime.now() <= expiry
     except ValueError:
         pass
-    
     try:
-        # Пробуем без времени (полный формат) - до конца дня
         expiry = datetime.strptime(expires_at, "%d.%m.%Y")
         expiry = expiry.replace(hour=23, minute=59, second=59)
         return datetime.now() <= expiry
     except ValueError:
         pass
-    
     try:
-        # Пробуем без времени (короткий год) - до конца дня
         expiry = datetime.strptime(expires_at, "%d.%m.%y")
         expiry = expiry.replace(hour=23, minute=59, second=59)
         return datetime.now() <= expiry
     except ValueError:
         pass
-    
-    # Если ни один формат не подошел
     return False
 
 # =====================================
-# Проверка длительности промокода (с поддержкой дней)
+# Проверка длительности промокода
 # =====================================
 
 def is_duration_valid(promo) -> bool:
-    """
-    Проверяет, действителен ли промокод по длительности.
-    Поддерживает форматы: 2d, 5h, 30m, 10s, 2d5h30m, 3h15m, 2h5s
-    """
-    
-    duration = promo[6]  # duration
-    created_at = promo[12]  # created_at
-    
+    duration = promo[6]
+    created_at = promo[12]
     if not duration or not created_at:
         return False
-    
     try:
         created = datetime.strptime(created_at, "%d.%m.%Y %H:%M")
     except ValueError:
         return False
-    
-    # Парсим длительность с поддержкой d, h, m, s
-    days = 0
-    hours = 0
-    minutes = 0
-    seconds = 0
-    
+    days = hours = minutes = seconds = 0
     d_match = re.search(r'(\d+)d', duration)
     h_match = re.search(r'(\d+)h', duration)
     m_match = re.search(r'(\d+)m', duration)
     s_match = re.search(r'(\d+)s', duration)
-    
-    if d_match:
-        days = int(d_match.group(1))
-    if h_match:
-        hours = int(h_match.group(1))
-    if m_match:
-        minutes = int(m_match.group(1))
-    if s_match:
-        seconds = int(s_match.group(1))
-    
-    expiry = created + timedelta(
-        days=days,
-        hours=hours,
-        minutes=minutes,
-        seconds=seconds
-    )
-    
+    if d_match: days = int(d_match.group(1))
+    if h_match: hours = int(h_match.group(1))
+    if m_match: minutes = int(m_match.group(1))
+    if s_match: seconds = int(s_match.group(1))
+    expiry = created + timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
     return datetime.now() <= expiry
