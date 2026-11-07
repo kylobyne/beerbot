@@ -12,7 +12,7 @@ START_PRIVATE = (
     "Бот работает только в группах!"
 )
 PRIVATE_DISABLED = '<tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji><i> Эта команда недоступна в личных сообщениях.</i>'
-DRINKING_BANNED = "🚫 <b>Пивная пауза</b>\n\nВас закодировали: вы больше не можете пить в этом чате."
+DRINKING_BANNED = '<tg-emoji emoji-id="5420323339723881652">⚠️</tg-emoji><i>Вас закодировали: вы больше не можете пить в этом чате.</i>'
 DRINK_NEXT = (
     '<i>{name}, ты выпил(а) {liters} л. пива <tg-emoji emoji-id="5264737672684907396">🍻</tg-emoji>. Всего выпито - {total_liters} л.</i>'
     "\n"
