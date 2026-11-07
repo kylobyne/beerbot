@@ -1,8 +1,8 @@
 import html
 import logging
 import time
-import math
 import asyncio
+from collections import OrderedDict
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramAPIError
@@ -23,7 +23,6 @@ from database import (
 )
 from config import (
     ROWS_PER_PAGE,
-    PAGINATION_COOLDOWN_SECONDS,
     ALLOWED_STATUSES
 )
 from handlers.Middleware import CooldownMiddleware # Импортируем middleware
@@ -32,6 +31,14 @@ from handlers.Middleware import CooldownMiddleware # Импортируем midd
 router = Router()
 # Подключаем к нему middleware
 router.callback_query.middleware(CooldownMiddleware()) 
+
+# Кеш снимает повторные запросы к Telegram; после TTL статус проверяется заново.
+MEMBER_STATUS_CACHE_TTL_SECONDS = 60
+MEMBER_STATUS_CACHE_MAX_SIZE = 10_000
+# Основная пачка быстро заполняет страницу, маленькая пачка проверяет наличие следующей.
+MEMBER_CHECK_BATCH_SIZE = 20
+MEMBER_LOOKAHEAD_BATCH_SIZE = 5
+member_status_cache: OrderedDict[tuple[int, int], tuple[bool, float]] = OrderedDict()
 
 
 def format_liters(value: float):
@@ -50,8 +57,8 @@ def get_rank_emoji(rank: int):
     )
 
 
-def leaderboard_keyboard(chat_id, page, pages):
-    if pages <= 1:
+def leaderboard_keyboard(chat_id: int, page: int, has_next_page: bool):
+    if page == 0 and not has_next_page:
         return None
 
     builder = InlineKeyboardBuilder()
@@ -64,11 +71,11 @@ def leaderboard_keyboard(chat_id, page, pages):
         )
 
     builder.button(
-        text=f"{page+1}/{pages}",
+        text=f"{page + 1}/…" if has_next_page else f"{page + 1}/{page + 1}",
         callback_data=f"beer_top:{chat_id}:current"
     )
 
-    if page < pages - 1:
+    if has_next_page:
         builder.button(
             text="▶️",
             callback_data=f"beer_top:{chat_id}:{page+1}",
@@ -80,54 +87,87 @@ def leaderboard_keyboard(chat_id, page, pages):
 
 
 async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
-    """
-    Получает всех игроков из БД, асинхронно проверяет их статус в чате параллельными пачками,
-    динамически нарезает на страницы и возвращает (текст, клавиатура).
-    """
+    """Проверяет участников только до нужной страницы и собирает её текст."""
     all_db_rows = get_leaderboard(chat_id)
     if not all_db_rows:
         return messages.EMPTY_LEADERBOARD, None
 
-    valid_rows = []
+    def get_cached_status(cache_key: tuple[int, int]) -> bool | None:
+        # При обращении переносим запись в конец, сохраняя недавно использованные статусы.
+        cached = member_status_cache.get(cache_key)
+        if cached is None:
+            return None
+
+        is_allowed, expires_at = cached
+        if expires_at <= time.monotonic():
+            member_status_cache.pop(cache_key, None)
+            return None
+
+        member_status_cache.move_to_end(cache_key)
+        return is_allowed
+
+    def cache_status(cache_key: tuple[int, int], is_allowed: bool) -> None:
+        # При заполнении удаляем наименее недавно использованную запись за O(1).
+        member_status_cache.pop(cache_key, None)
+        if len(member_status_cache) >= MEMBER_STATUS_CACHE_MAX_SIZE:
+            member_status_cache.popitem(last=False)
+        member_status_cache[cache_key] = (
+            is_allowed,
+            time.monotonic() + MEMBER_STATUS_CACHE_TTL_SECONDS,
+        )
 
     # Внутренняя функция для проверки статуса одного игрока
     async def check_member(row):
+        cache_key = (chat_id, row["user_id"])
+        cached_status = get_cached_status(cache_key)
+        if cached_status is not None:
+            return row if cached_status else None
+
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=row["user_id"])
-            if member.status in ALLOWED_STATUSES:
-                return row
         except Exception:
-            pass
-        return None
+            return None
 
-    # Опрашиваем Telegram параллельными пачками (батчами) по 10 человек, чтобы не поймать FloodWait
-    BATCH_SIZE = 10
-    for i in range(0, len(all_db_rows), BATCH_SIZE):
-        batch = all_db_rows[i:i + BATCH_SIZE]
-        tasks = [check_member(row) for row in batch]
-        
-        # Выполняем 10 запросов одновременно
-        batch_results = await asyncio.gather(*tasks)
-        
-        # Отбираем «живых» пользователей
-        for res in batch_results:
-            if res is not None:
-                valid_rows.append(res)
+        is_allowed = member.status in ALLOWED_STATUSES
+        cache_status(cache_key, is_allowed)
+        return row if is_allowed else None
 
+    # Статусы проверяются по рейтингу и только до запрошенной страницы.
+    target_page = max(0, target_page)
+    start_index = target_page * ROWS_PER_PAGE
+    page_end = start_index + ROWS_PER_PAGE
+    valid_rows = []
+    next_offset = 0
+
+    for offset in range(0, len(all_db_rows), MEMBER_CHECK_BATCH_SIZE):
+        batch = all_db_rows[offset:offset + MEMBER_CHECK_BATCH_SIZE]
+        batch_results = await asyncio.gather(*(check_member(row) for row in batch))
+        valid_rows.extend(row for row in batch_results if row is not None)
+        next_offset = offset + len(batch)
+        if len(valid_rows) >= page_end:
+            break
+
+    # Достаточно найти одну следующую запись, чтобы решить, показывать ли стрелку.
+    lookahead_offset = next_offset if len(valid_rows) == page_end else len(all_db_rows)
+    for offset in range(lookahead_offset, len(all_db_rows), MEMBER_LOOKAHEAD_BATCH_SIZE):
+        batch = all_db_rows[offset:offset + MEMBER_LOOKAHEAD_BATCH_SIZE]
+        batch_results = await asyncio.gather(*(check_member(row) for row in batch))
+        valid_rows.extend(row for row in batch_results if row is not None)
+        if len(valid_rows) > page_end:
+            break
     if not valid_rows:
         return messages.EMPTY_LEADERBOARD, None
 
-    # Динамически рассчитываем реальное количество страниц по отфильтрованным юзерам
-    total_users = len(valid_rows)
-    total_pages = math.ceil(total_users / ROWS_PER_PAGE)
-
     # Защита от выхода за границы страниц
-    page = max(0, min(target_page, total_pages - 1))
+    page = min(target_page, (len(valid_rows) - 1) // ROWS_PER_PAGE)
 
     # Нарезаем массив строго под текущую страницу
     start_index = page * ROWS_PER_PAGE
     end_index = start_index + ROWS_PER_PAGE
     page_rows = valid_rows[start_index:end_index]
+    has_next_page = len(valid_rows) > end_index
+    # Полное число страниц неизвестно, пока не проверены все участники рейтинга.
+    total_pages = "…" if has_next_page else page + 1
 
     # Собираем текст сообщения
     lines = [messages.LEADERBOARD_TITLE.format(page=page + 1, pages=total_pages)]
@@ -142,7 +182,7 @@ async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
         )
 
     full_text = "\n".join(lines) + messages.TEXT_INFO
-    keyboard = leaderboard_keyboard(chat_id, page, total_pages)
+    keyboard = leaderboard_keyboard(chat_id, page, has_next_page)
 
     return full_text, keyboard
 
