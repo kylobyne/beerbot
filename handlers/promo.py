@@ -4,8 +4,6 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
-from datetime import datetime, timedelta
-import re
 
 from messages import *
 import database
@@ -140,32 +138,8 @@ async def activate_promo(message: Message):
 # Проверка даты истечения (expires_at)
 # =====================================
 
-def is_expires_at_valid(expires_at: str) -> bool:
-    if not expires_at:
-        return False
-    try:
-        expiry = datetime.strptime(expires_at, "%d.%m.%Y %H:%M")
-        return datetime.now() <= expiry
-    except ValueError:
-        pass
-    try:
-        expiry = datetime.strptime(expires_at, "%d.%m.%y %H:%M")
-        return datetime.now() <= expiry
-    except ValueError:
-        pass
-    try:
-        expiry = datetime.strptime(expires_at, "%d.%m.%Y")
-        expiry = expiry.replace(hour=23, minute=59, second=59)
-        return datetime.now() <= expiry
-    except ValueError:
-        pass
-    try:
-        expiry = datetime.strptime(expires_at, "%d.%m.%y")
-        expiry = expiry.replace(hour=23, minute=59, second=59)
-        return datetime.now() <= expiry
-    except ValueError:
-        pass
-    return False
+def is_expires_at_valid(expires_at: int | None) -> bool:
+    return not database.is_expires_at_expired(expires_at)
 
 # =====================================
 # Проверка длительности промокода
@@ -174,20 +148,4 @@ def is_expires_at_valid(expires_at: str) -> bool:
 def is_duration_valid(promo) -> bool:
     duration = promo[6]
     created_at = promo[12]
-    if not duration or not created_at:
-        return False
-    try:
-        created = datetime.strptime(created_at, "%d.%m.%Y %H:%M")
-    except ValueError:
-        return False
-    days = hours = minutes = seconds = 0
-    d_match = re.search(r'(\d+)d', duration)
-    h_match = re.search(r'(\d+)h', duration)
-    m_match = re.search(r'(\d+)m', duration)
-    s_match = re.search(r'(\d+)s', duration)
-    if d_match: days = int(d_match.group(1))
-    if h_match: hours = int(h_match.group(1))
-    if m_match: minutes = int(m_match.group(1))
-    if s_match: seconds = int(s_match.group(1))
-    expiry = created + timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
-    return datetime.now() <= expiry
+    return not database.is_duration_expired(duration, created_at)

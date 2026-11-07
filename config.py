@@ -18,6 +18,7 @@ COOLDOWN_TIME = 5  # Время ограничения в секундах
 COOLDOWN_SECONDS = 3600
 ROWS_PER_PAGE = 20
 PAGINATION_COOLDOWN_SECONDS = 3
+TIMEZONE = "Europe/Moscow"
 
 DATABASE_DIRECTORY = Path("sqlite3")
 DATABASE_DIRECTORY.mkdir(exist_ok=True)

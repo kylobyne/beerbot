@@ -2,13 +2,18 @@ import random
 import re
 import sqlite3
 import time
-from datetime import datetime, timedelta
 
 from config import (
     DATABASE_DIRECTORY,
     COOLDOWN_SECONDS,
     ROWS_PER_PAGE,
     INVOICE_CLEAN_THRESHOLD,
+)
+from time_utils import (
+    duration_to_seconds,
+    legacy_datetime_to_timestamp,
+    local_datetime_to_timestamp,
+    now_timestamp,
 )
 
 
@@ -50,10 +55,20 @@ def get_connection(chat_id: int):
             full_name TEXT NOT NULL,
             outcome TEXT NOT NULL CHECK (outcome IN ('success', 'cooldown')),
             liters REAL NOT NULL DEFAULT 0,
+            cooldown_delay_seconds REAL,
             created_at INTEGER NOT NULL
         )
         """
     )
+
+    attempt_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(drink_attempts)")
+    }
+    if "cooldown_delay_seconds" not in attempt_columns:
+        connection.execute(
+            "ALTER TABLE drink_attempts ADD COLUMN cooldown_delay_seconds REAL"
+        )
 
     connection.execute(
         """
@@ -173,8 +188,17 @@ def drink(chat_id: int, user_id: int, name: str):
                 return (
                     False,
                     float(remaining),
-                    float(row["total_liters"])
+                    float(row["total_liters"]),
+                    None,
                 )
+
+            cooldown_delay = (
+                max(0, now - row["last_drink"] - COOLDOWN_SECONDS)
+                if row["last_drink"] > 0
+                else None
+            )
+        else:
+            cooldown_delay = None
 
         amount = round(
             random.randint(1, 50) / 10,
@@ -225,7 +249,7 @@ def drink(chat_id: int, user_id: int, name: str):
             (user_id,)
         ).fetchone()[0]
 
-    return True, amount, float(total)
+    return True, amount, float(total), cooldown_delay
 
 
 def get_leaderboard(chat_id: int):
@@ -315,6 +339,7 @@ def record_drink_attempt(
     outcome: str,
     liters: float = 0,
     created_at: int | None = None,
+    cooldown_delay_seconds: float | None = None,
 ):
     timestamp = created_at if created_at is not None else int(time.time())
     cutoff = timestamp - 48 * 60 * 60
@@ -322,10 +347,10 @@ def record_drink_attempt(
         connection.execute(
             """
             INSERT INTO drink_attempts
-                (user_id, username, full_name, outcome, liters, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (user_id, username, full_name, outcome, liters, cooldown_delay_seconds, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, username, full_name, outcome, liters, timestamp),
+            (user_id, username, full_name, outcome, liters, cooldown_delay_seconds, timestamp),
         )
         connection.execute(
             "DELETE FROM drink_attempts WHERE created_at < ?",
@@ -368,6 +393,30 @@ def get_drink_history(chat_id: int, user_id: int, since: int | None = None):
             (user_id, cutoff),
         ).fetchone()
     return rows, int(counts["attempts"]), int(counts["successes"])
+
+
+def get_drink_accuracy(
+    chat_id: int,
+    user_id: int,
+    since: int | None = None,
+) -> tuple[float | None, int]:
+    cutoff = since if since is not None else int(time.time()) - 48 * 60 * 60
+    with get_connection(chat_id) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS samples,
+                AVG(MAX(0.0, 100.0 * (1.0 - cooldown_delay_seconds / ?))) AS accuracy
+            FROM drink_attempts
+            WHERE user_id = ?
+                AND created_at >= ?
+                AND outcome = 'success'
+                AND cooldown_delay_seconds IS NOT NULL
+            """,
+            (COOLDOWN_SECONDS, user_id, cutoff),
+        ).fetchone()
+    samples = int(row["samples"])
+    return (float(row["accuracy"]) if samples else None, samples)
 
 
 def get_mod_permissions(chat_id: int, user_id: int) -> dict[str, bool]:
@@ -804,6 +853,97 @@ def drink_paid(
 PROMO_DB = "sqlite3/promo.sqlite3"
 
 
+def _create_promocodes_table(cursor, table_name: str):
+    cursor.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE NOT NULL,
+            reward_type TEXT,
+            reward_amount INTEGER DEFAULT 0,
+            time_limited INTEGER DEFAULT 0,
+            expires_at INTEGER,
+            duration TEXT,
+            activation_limited INTEGER DEFAULT 0,
+            max_activations INTEGER,
+            used_count INTEGER DEFAULT 0,
+            bind_users TEXT,
+            created_by INTEGER,
+            created_at INTEGER,
+            updated_at INTEGER,
+            active INTEGER DEFAULT 1
+        )
+        """
+    )
+
+
+def _create_promo_uses_table(cursor, table_name: str):
+    cursor.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            promo_id INTEGER,
+            user_id INTEGER,
+            used_at INTEGER
+        )
+        """
+    )
+
+
+def _migrate_timestamp_columns(cursor, table_name: str, timestamp_columns: tuple[str, ...], create_table):
+    schema = cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+    if all(
+        next((row[2].upper() for row in schema if row[1] == name), "") == "INTEGER"
+        for name in timestamp_columns
+    ):
+        return
+
+    columns = [row[1] for row in schema]
+    rows = cursor.execute(f"SELECT {', '.join(columns)} FROM {table_name}").fetchall()
+    temp_table = f"{table_name}_unix_migration"
+    cursor.execute(f"DROP TABLE IF EXISTS {temp_table}")
+    create_table(cursor, temp_table)
+
+    placeholders = ", ".join("?" for _ in columns)
+    column_list = ", ".join(columns)
+    for row in rows:
+        values = list(row)
+        for column in timestamp_columns:
+            index = columns.index(column)
+            values[index] = legacy_datetime_to_timestamp(values[index])
+        cursor.execute(
+            f"INSERT INTO {temp_table} ({column_list}) VALUES ({placeholders})",
+            values,
+        )
+
+    cursor.execute(f"DROP TABLE {table_name}")
+    cursor.execute(f"ALTER TABLE {temp_table} RENAME TO {table_name}")
+
+
+def _normalize_promo_time_values(time_limited, expires_at, duration):
+    if not time_limited:
+        return None, None
+
+    if duration:
+        absolute_expiry = local_datetime_to_timestamp(duration, end_of_day=True)
+        if absolute_expiry is not None:
+            return absolute_expiry, None
+        if duration_to_seconds(duration) is None:
+            raise ValueError(f"Unsupported promo time value: {duration!r}")
+        return None, duration
+
+    if expires_at is None:
+        return None, None
+    if isinstance(expires_at, str):
+        if expires_at.strip().isdigit():
+            return int(expires_at.strip()), None
+        timestamp = local_datetime_to_timestamp(expires_at, end_of_day=True)
+        if timestamp is None:
+            raise ValueError(f"Unsupported promo expiry value: {expires_at!r}")
+        return timestamp, None
+    return int(expires_at), None
+
+
 def promo_connect():
     return sqlite3.connect(PROMO_DB)
 
@@ -811,45 +951,55 @@ def promo_connect():
 def create_promo_database():
     db = promo_connect()
     cursor = db.cursor()
+    try:
+        cursor.execute("BEGIN IMMEDIATE")
+        _create_promocodes_table(cursor, "promocodes")
+        _create_promo_uses_table(cursor, "promo_uses")
+        _migrate_timestamp_columns(
+            cursor,
+            "promocodes",
+            ("expires_at", "created_at", "updated_at"),
+            _create_promocodes_table,
+        )
+        _migrate_timestamp_columns(
+            cursor,
+            "promo_uses",
+            ("used_at",),
+            _create_promo_uses_table,
+        )
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS promocodes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        code TEXT UNIQUE NOT NULL,
-        reward_type TEXT,
-        reward_amount INTEGER DEFAULT 0,
-        time_limited INTEGER DEFAULT 0,
-        expires_at TEXT,
-        duration TEXT,
-        activation_limited INTEGER DEFAULT 0,
-        max_activations INTEGER,
-        used_count INTEGER DEFAULT 0,
-        bind_users TEXT,
-        created_by INTEGER,
-        created_at TEXT,
-        updated_at TEXT,
-        active INTEGER DEFAULT 1
-    )
-    """)
+        legacy_duration_rows = cursor.execute(
+            "SELECT id, duration, expires_at FROM promocodes WHERE duration IS NOT NULL"
+        ).fetchall()
+        for promo_id, duration, expires_at in legacy_duration_rows:
+            if "." not in duration:
+                continue
+            try:
+                legacy_expiry = legacy_datetime_to_timestamp(duration)
+            except ValueError:
+                continue
+            cursor.execute(
+                "UPDATE promocodes SET expires_at = COALESCE(expires_at, ?), duration = NULL WHERE id = ?",
+                (legacy_expiry, promo_id),
+            )
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS promo_uses (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        promo_id INTEGER,
-        user_id INTEGER,
-        used_at TEXT
-    )
-    """)
-
-    db.commit()
-    db.close()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def create_promo(data):
     db = promo_connect()
     cursor = db.cursor()
-
-    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    now = now_timestamp()
+    expires_at, duration = _normalize_promo_time_values(
+        data.get("time_limited", 0),
+        data.get("expires_at"),
+        data.get("duration"),
+    )
 
     bind_users = data.get("bind_users")
     if isinstance(bind_users, list):
@@ -880,8 +1030,8 @@ def create_promo(data):
             data.get("reward_type"),
             data.get("reward_amount", 0),
             data.get("time_limited", 0),
-            data.get("expires_at"),
-            data.get("duration"),
+            expires_at,
+            duration,
             data.get("activation_limited", 0),
             data.get("max_activations"),
             bind_users,
@@ -1026,8 +1176,12 @@ def get_promos_count():
 def update_promo(code, data):
     db = promo_connect()
     cursor = db.cursor()
-
-    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    now = now_timestamp()
+    expires_at, duration = _normalize_promo_time_values(
+        data.get("time_limited", 0),
+        data.get("expires_at"),
+        data.get("duration"),
+    )
 
     bind_users = data.get("bind_users")
     if isinstance(bind_users, list):
@@ -1056,8 +1210,8 @@ def update_promo(code, data):
             data.get("reward_type"),
             data.get("reward_amount", 0),
             data.get("time_limited", 0),
-            data.get("expires_at"),
-            data.get("duration"),
+            expires_at,
+            duration,
             data.get("activation_limited", 0),
             data.get("max_activations"),
             bind_users,
@@ -1118,87 +1272,31 @@ def has_used_promo(promo_id: int, user_id: int) -> bool:
     return count > 0
 
 
-def is_expires_at_expired(expires_at: str) -> bool:
-    """
-    Проверяет, истекла ли дата.
-    Поддерживает форматы:
-    - ДД.ММ.ГГГГ ЧЧ:ММ
-    - ДД.ММ.ГГ ЧЧ:ММ
-    - ДД.ММ.ГГГГ (до конца дня)
-    - ДД.ММ.ГГ (до конца дня)
-    """
-    if not expires_at:
+def is_expires_at_expired(expires_at: int | str | None) -> bool:
+    if expires_at is None or expires_at == "":
         return False
-    
-    try:
-        expiry = datetime.strptime(expires_at, "%d.%m.%Y %H:%M")
-        return datetime.now() > expiry
-    except ValueError:
-        pass
-    
-    try:
-        expiry = datetime.strptime(expires_at, "%d.%m.%y %H:%M")
-        return datetime.now() > expiry
-    except ValueError:
-        pass
-    
-    try:
-        expiry = datetime.strptime(expires_at, "%d.%m.%Y")
-        expiry = expiry.replace(hour=23, minute=59, second=59)
-        return datetime.now() > expiry
-    except ValueError:
-        pass
-    
-    try:
-        expiry = datetime.strptime(expires_at, "%d.%m.%y")
-        expiry = expiry.replace(hour=23, minute=59, second=59)
-        return datetime.now() > expiry
-    except ValueError:
-        pass
-    
-    return False
+    timestamp = (
+        legacy_datetime_to_timestamp(expires_at)
+        if isinstance(expires_at, str) and not expires_at.strip().isdigit()
+        else int(expires_at)
+    )
+    return now_timestamp() >= timestamp
 
 
-def is_duration_expired(duration: str, created_at: str) -> bool:
-    """
-    Проверяет, истекла ли длительность.
-    Поддерживает форматы: 2d, 5h, 30m, 10s, 2d5h30m, 3h15m, 2h5s
-    """
+def is_duration_expired(duration: str, created_at: int | str | None) -> bool:
     if not duration or not created_at:
         return False
-    
-    try:
-        created = datetime.strptime(created_at, "%d.%m.%Y %H:%M")
-    except ValueError:
+
+    seconds = duration_to_seconds(duration)
+    if seconds is None:
         return False
-    
-    days = 0
-    hours = 0
-    minutes = 0
-    seconds = 0
-    
-    d_match = re.search(r'(\d+)d', duration)
-    h_match = re.search(r'(\d+)h', duration)
-    m_match = re.search(r'(\d+)m', duration)
-    s_match = re.search(r'(\d+)s', duration)
-    
-    if d_match:
-        days = int(d_match.group(1))
-    if h_match:
-        hours = int(h_match.group(1))
-    if m_match:
-        minutes = int(m_match.group(1))
-    if s_match:
-        seconds = int(s_match.group(1))
-    
-    expiry = created + timedelta(
-        days=days,
-        hours=hours,
-        minutes=minutes,
-        seconds=seconds
+
+    created_timestamp = (
+        legacy_datetime_to_timestamp(created_at)
+        if isinstance(created_at, str) and not created_at.strip().isdigit()
+        else int(created_at)
     )
-    
-    return datetime.now() > expiry
+    return now_timestamp() >= created_timestamp + seconds
 
 
 def use_promo(promo_id: int, user_id: int):
@@ -1206,7 +1304,7 @@ def use_promo(promo_id: int, user_id: int):
     db = promo_connect()
     cursor = db.cursor()
 
-    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    now = now_timestamp()
 
     cursor.execute(
         """

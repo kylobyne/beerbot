@@ -70,7 +70,7 @@ async def command_beer(message: Message):
         return
 
 
-    success, value, total_liters = drink(
+    success, value, total_liters, cooldown_delay = drink(
         message.chat.id,
         message.from_user.id,
         name
@@ -158,6 +158,7 @@ async def command_beer(message: Message):
         name,
         "success",
         value,
+        cooldown_delay_seconds=cooldown_delay,
     )
 
     minutes, seconds = divmod(

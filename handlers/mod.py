@@ -1,6 +1,5 @@
 import html
 import logging
-from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
@@ -15,6 +14,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import database
 from handlers.ephemeral import send_ephemeral_message
 import messages
+from time_utils import format_timestamp
 
 
 router = Router()
@@ -256,13 +256,12 @@ async def render_admin_permissions(callback: CallbackQuery, target_id: int):
     )
 
 
-def history_text(target_id: int, rows, attempts: int, successes: int):
-    accuracy = round(successes * 100 / attempts) if attempts else 0
+def history_text(target_id: int, rows, accuracy: float | None, successes: int):
     if rows:
         name = html.escape(rows[0]["full_name"])
         lines = [f"<b>История питья за 48 часов · {name}</b> · ID <code>{target_id}</code>"]
         for row in rows:
-            happened_at = datetime.fromtimestamp(row["created_at"]).strftime("%d.%m %H:%M")
+            happened_at = format_timestamp(row["created_at"], "%d.%m %H:%M:%S")
             lines.append(f"{happened_at} · {row['liters']:.1f} л.")
         if successes > len(rows):
             lines.append(f"Показаны последние {len(rows)} успешных попыток из {successes}.")
@@ -271,7 +270,7 @@ def history_text(target_id: int, rows, attempts: int, successes: int):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=f"Аккуратность: {accuracy}%",
+        text=f"Аккуратность: {round(accuracy)}%" if accuracy is not None else "Аккуратность: нет данных",
         callback_data=f"mod:accuracy:{target_id}",
     )
     return "\n".join(lines), builder.as_markup()
@@ -346,7 +345,8 @@ async def command_mod(message: Message):
     if subcommand == "history":
         database.record_mod_audit(message.chat.id, message.from_user.id, "view_history", target_id)
         rows, attempts, successes = database.get_drink_history(message.chat.id, target_id)
-        text, keyboard = history_text(target_id, rows, attempts, successes)
+        accuracy, _ = database.get_drink_accuracy(message.chat.id, target_id)
+        text, keyboard = history_text(target_id, rows, accuracy, successes)
         await answer_ephemerally(message, text, keyboard)
         return
 
@@ -392,7 +392,7 @@ async def mod_callback(callback: CallbackQuery):
         entries = database.get_mod_audit(chat_id)
         lines = ["<b>Журнал аудита</b>"]
         for entry in entries:
-            happened_at = datetime.fromtimestamp(entry["created_at"]).strftime("%d.%m %H:%M")
+            happened_at = format_timestamp(entry["created_at"], "%d.%m %H:%M:%S")
             target = f" · цель <code>{entry['target_id']}</code>" if entry["target_id"] else ""
             details = f" · {html.escape(entry['details'])}" if entry["details"] else ""
             lines.append(
@@ -442,10 +442,12 @@ async def mod_callback(callback: CallbackQuery):
             await callback.answer("У вас нет актуального разрешения на просмотр истории.", show_alert=True)
             return
         target_id = int(parts[2])
-        _, attempts, successes = database.get_drink_history(chat_id, target_id)
-        accuracy = round(successes * 100 / attempts) if attempts else 0
+        accuracy, samples = database.get_drink_accuracy(chat_id, target_id)
+        if accuracy is None:
+            await callback.answer("Пока недостаточно данных об успешных попытках после cooldown.", show_alert=True)
+            return
         await callback.answer(
-            f"Успешно: {successes}/{attempts} попыток за 48 часов ({accuracy}%).",
+            f"Аккуратность по времени: {round(accuracy)}% по {samples} попыткам за 48 часов.",
             show_alert=True,
         )
         return

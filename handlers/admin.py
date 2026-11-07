@@ -10,11 +10,16 @@ from aiogram.types import (
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 import re
-from datetime import datetime, timedelta
 
 from messages import *
 import database
 from config import admins, PROMOS_PER_PAGE
+from time_utils import (
+    duration_to_seconds,
+    format_timestamp,
+    local_datetime_to_timestamp,
+    now_timestamp,
+)
 
 router = Router()
 
@@ -75,36 +80,13 @@ def validate_time(duration: str) -> str | None:
     if not duration:
         return VALIDATE_TIME_EMPTY
     duration = duration.strip()
-    date_patterns = [
-        r'^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$',
-        r'^\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}$',
-        r'^\d{2}\.\d{2}\.\d{4}$',
-        r'^\d{2}\.\d{2}\.\d{2}$'
-    ]
-    for pattern in date_patterns:
-        if re.match(pattern, duration):
-            try:
-                if ' ' in duration:
-                    if len(duration.split('.')[2].split()[0]) == 2:
-                        parsed_date = datetime.strptime(duration, "%d.%m.%y %H:%M")
-                    else:
-                        parsed_date = datetime.strptime(duration, "%d.%m.%Y %H:%M")
-                else:
-                    if len(duration.split('.')[2]) == 2:
-                        parsed_date = datetime.strptime(duration, "%d.%m.%y")
-                        parsed_date = parsed_date.replace(hour=23, minute=59)
-                    else:
-                        parsed_date = datetime.strptime(duration, "%d.%m.%Y")
-                        parsed_date = parsed_date.replace(hour=23, minute=59)
-                if parsed_date < datetime.now():
-                    return VALIDATE_TIME_PAST_DATE
-                return None
-            except ValueError:
-                return VALIDATE_TIME_INVALID_DATE
-    duration_pattern = r'^(\d+d)?(\d+h)?(\d+m)?(\d+s)?$'
-    if re.match(duration_pattern, duration) and duration:
-        if any(unit in duration for unit in ['d', 'h', 'm', 's']):
-            return None
+    absolute_timestamp = local_datetime_to_timestamp(duration, end_of_day=True)
+    if absolute_timestamp is not None:
+        return VALIDATE_TIME_PAST_DATE if absolute_timestamp <= now_timestamp() else None
+    if re.match(r'^\d{2}\.\d{2}\.\d{2,4}(?: \d{2}:\d{2}(?::\d{2})?)?$', duration):
+        return VALIDATE_TIME_INVALID_DATE
+    if duration_to_seconds(duration) is not None:
+        return None
     return VALIDATE_TIME_INVALID_FORMAT
 
 def validate_activations(amount_str: str) -> tuple[int | None, str | None]:
@@ -135,51 +117,27 @@ def validate_user_id(user_id_str: str) -> tuple[int | None, str | None]:
 # Вспомогательные функции для времени
 # =====================================
 
-def parse_duration_to_datetime(duration: str, created_at: datetime = None) -> datetime | None:
-    """Парсит duration (дата или длительность) и возвращает datetime истечения."""
+def parse_duration_to_timestamp(duration: str, created_at: int | None = None) -> int | None:
+    """Возвращает Unix-время истечения по абсолютной дате или длительности."""
     if not duration:
         return None
-    if created_at is None:
-        created_at = datetime.now()
     duration = duration.strip()
+    absolute_timestamp = local_datetime_to_timestamp(duration, end_of_day=True)
+    if absolute_timestamp is not None:
+        return absolute_timestamp
+    seconds = duration_to_seconds(duration)
+    if seconds is None:
+        return None
+    return (created_at if created_at is not None else now_timestamp()) + seconds
 
-    # Пробуем дату
-    date_patterns = [
-        (r'^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$', "%d.%m.%Y %H:%M"),
-        (r'^\d{2}\.\d{2}\.\d{2} \d{2}:\d{2}$', "%d.%m.%y %H:%M"),
-        (r'^\d{2}\.\d{2}\.\d{4}$', "%d.%m.%Y"),
-        (r'^\d{2}\.\d{2}\.\d{2}$', "%d.%m.%y")
-    ]
-    for pattern, fmt in date_patterns:
-        if re.match(pattern, duration):
-            try:
-                expiry = datetime.strptime(duration, fmt)
-                if ' ' not in duration:  # только дата → конец дня
-                    expiry = expiry.replace(hour=23, minute=59, second=59)
-                return expiry
-            except ValueError:
-                return None
 
-    # Длительность
-    days = hours = minutes = seconds = 0
-    d_match = re.search(r'(\d+)d', duration)
-    h_match = re.search(r'(\d+)h', duration)
-    m_match = re.search(r'(\d+)m', duration)
-    s_match = re.search(r'(\d+)s', duration)
-    if d_match: days = int(d_match.group(1))
-    if h_match: hours = int(h_match.group(1))
-    if m_match: minutes = int(m_match.group(1))
-    if s_match: seconds = int(s_match.group(1))
-    return created_at + timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
-
-def calculate_remaining(expiry: datetime) -> str:
+def calculate_remaining(expiry: int) -> str:
     """Возвращает 'Осталось X дней, Y часов, Z минут' с опусканием нулей."""
-    now = datetime.now()
-    if expiry <= now:
+    remaining = expiry - now_timestamp()
+    if remaining <= 0:
         return "Истекло"
-    delta = expiry - now
-    days = delta.days
-    hours, remainder = divmod(delta.seconds, 3600)
+    days, remainder = divmod(remaining, 86400)
+    hours, remainder = divmod(remainder, 3600)
     minutes, seconds = divmod(remainder, 60)
     parts = []
     if days > 0:
@@ -192,9 +150,9 @@ def calculate_remaining(expiry: datetime) -> str:
         parts.append(f"{seconds} сек.")
     return "Осталось " + ", ".join(parts)
 
-def format_expiry(expiry: datetime) -> str:
-    """Форматирует дату в 'До: ДД.ММ.ГГГГ ЧЧ:ММ'."""
-    return f"До {expiry.strftime('%d.%m.%Y %H:%M')}"
+def format_expiry(expiry: int) -> str:
+    """Форматирует Unix timestamp в настроенной временной зоне."""
+    return f"До {format_timestamp(expiry, '%d.%m.%Y %H:%M:%S')}"
 
 # =====================================
 # Клавиатуры
@@ -269,16 +227,12 @@ def final_keyboard(code, edit_mode=False):
     time_display = 'Без ограничений'
     if code.get('time_limited'):
         duration = code.get('duration')
+        created_at = code.get('created_at')
+        expiry = parse_duration_to_timestamp(duration, created_at) if duration else code.get("expires_at")
         if edit_mode and duration == code.get('old_duration'):
-            # Показываем оставшееся время
-            created_at = code.get('created_at')
-            expiry = parse_duration_to_datetime(duration, created_at)
             if expiry:
                 time_display = calculate_remaining(expiry)
         else:
-            # Создание или изменено → "До: ..."
-            created_at = code.get('created_at')
-            expiry = parse_duration_to_datetime(duration, created_at)
             if expiry:
                 time_display = format_expiry(expiry)
 
@@ -621,6 +575,7 @@ async def time_no(callback: CallbackQuery):
     state = promo_states[user_id]
     state["time_limited"] = 0
     state["duration"] = None
+    state["expires_at"] = None
     if state.get("edit") or state.get("from_final"):
         state["from_final"] = False
         await show_final(callback, user_id)
@@ -882,8 +837,13 @@ async def settings_select(callback: CallbackQuery):
     promo_id = promo[0]
     used_count = promo[9] if promo[9] is not None else 0
     bind_users_raw = promo[10]
-    created_at_str = promo[12]
+    created_at = int(promo[12]) if promo[12] is not None else None
+    expires_at = promo[5]
     old_duration = promo[6]
+    duration = old_duration
+    if duration is None and expires_at is not None:
+        duration = format_timestamp(expires_at, "%d.%m.%Y %H:%M:%S")
+        old_duration = duration
 
     db = database.promo_connect()
     cursor = db.cursor()
@@ -897,13 +857,6 @@ async def settings_select(callback: CallbackQuery):
         filtered = [uid for uid in ids if uid not in used_users]
         filtered_bind = filtered if filtered else None
 
-    created_at = None
-    if created_at_str:
-        try:
-            created_at = datetime.strptime(created_at_str, "%d.%m.%Y %H:%M")
-        except ValueError:
-            pass
-
     promo_states[callback.from_user.id] = {
         "edit": True,
         "from_final": False,
@@ -912,8 +865,8 @@ async def settings_select(callback: CallbackQuery):
         "reward_type": promo[2],
         "reward_amount": promo[3],
         "time_limited": promo[4],
-        "expires_at": promo[5],
-        "duration": old_duration,
+        "expires_at": expires_at,
+        "duration": duration,
         "activation_limited": promo[7],
         "max_activations": promo[8],
         "used_count": used_count,
