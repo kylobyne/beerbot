@@ -7,6 +7,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
+    ChatMemberUpdated,
     Message,
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -31,6 +32,10 @@ async def member_status(bot, chat_id: int, user_id: int) -> str | None:
         member = await bot.get_chat_member(chat_id, user_id)
     except TelegramAPIError:
         return None
+
+    if member.status not in ADMIN_STATUSES:
+        database.clear_mod_permissions(chat_id, user_id)
+
     return member.status
 
 
@@ -45,6 +50,28 @@ async def has_permission(bot, chat_id: int, user_id: int, permission: str) -> bo
 
 async def is_owner(bot, chat_id: int, user_id: int) -> bool:
     return await member_status(bot, chat_id, user_id) == "creator"
+
+
+@router.chat_member()
+async def clear_permissions_after_demotion(event: ChatMemberUpdated):
+    target_id = event.new_chat_member.user.id
+    if event.new_chat_member.status in ADMIN_STATUSES:
+        return
+
+    existing_permissions = database.get_mod_permissions(event.chat.id, target_id)
+    if not existing_permissions:
+        return
+
+    status = await member_status(event.bot, event.chat.id, target_id)
+    if status is None or status in ADMIN_STATUSES:
+        return
+
+    database.record_mod_audit(
+        event.chat.id,
+        event.from_user.id,
+        "permissions_cleared_after_demotion",
+        target_id,
+    )
 
 
 async def delete_command_message(message: Message):

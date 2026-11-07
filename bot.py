@@ -101,7 +101,10 @@ async def main():
     # Запускаем фоновую задачу
     asyncio.create_task(periodic_db_cleaner())
 
-    await dp.start_polling(bot)
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types(),
+    )
 
 
 if __name__ == "__main__":

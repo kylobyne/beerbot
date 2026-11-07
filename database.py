@@ -383,6 +383,15 @@ def get_mod_permissions(chat_id: int, user_id: int) -> dict[str, bool]:
     return {row["permission"]: bool(row["enabled"]) for row in rows}
 
 
+def clear_mod_permissions(chat_id: int, user_id: int) -> int:
+    with get_connection(chat_id) as connection:
+        cursor = connection.execute(
+            "DELETE FROM mod_permissions WHERE user_id = ?",
+            (user_id,),
+        )
+    return cursor.rowcount
+
+
 def set_mod_permission(
     chat_id: int,
     user_id: int,
