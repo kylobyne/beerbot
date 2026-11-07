@@ -266,14 +266,17 @@ def history_text(
 ):
     if rows:
         name = html.escape(rows[0]["full_name"])
-        lines = [f"<b>История питья за 48 часов · {name}</b> · ID <code>{target_id}</code>"]
+        lines = [f"<b>История питья за 48 часов · {name}</b> · ID <code>{target_id}</code>", ""]
         for row in rows:
             happened_at = format_timestamp(row["created_at"], "%d.%m %H:%M:%S")
             lines.append(f"{happened_at} · {row['liters']:.1f} л.")
         if successes > len(rows):
             lines.append(f"Показаны последние {len(rows)} успешных попыток из {successes}.")
     else:
-        lines = [f"<b>История питья за 48 часов</b> · ID <code>{target_id}</code>", "Успешных попыток нет."]
+        lines = [f"<b>История питья за 48 часов</b> · ID <code>{target_id}</code>", "Успешных попыток нет.", ""]
+
+    if lines[-1] != "":
+        lines.append("")
 
     if pattern_match is None:
         lines.append(
@@ -421,7 +424,7 @@ async def mod_callback(callback: CallbackQuery):
             return
         database.record_mod_audit(chat_id, user_id, "view_audit")
         entries = database.get_mod_audit(chat_id)
-        lines = ["<b>Журнал аудита</b>"]
+        lines = ["<b>Журнал аудита</b>", ""]
         for entry in entries:
             happened_at = format_timestamp(entry["created_at"], "%d.%m %H:%M:%S")
             target = f" · цель <code>{entry['target_id']}</code>" if entry["target_id"] else ""
@@ -430,7 +433,7 @@ async def mod_callback(callback: CallbackQuery):
                 f"{happened_at} · <code>{entry['actor_id']}</code> · "
                 f"{html.escape(entry['action'])}{target}{details}"
             )
-        if len(lines) == 1:
+        if len(lines) == 2:
             lines.append("Записей пока нет.")
         builder = InlineKeyboardBuilder()
         builder.button(text="Назад", callback_data="mod:main")
