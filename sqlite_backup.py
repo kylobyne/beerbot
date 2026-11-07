@@ -5,49 +5,39 @@ import shutil
 import sqlite3
 import uuid
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from config import (
     DATABASE_DIRECTORY,
-    SQLITE_AUTOBACKUP_INTERVAL_SECONDS,
+    SQLITE_AUTOBACKUP_HOUR,
     SQLITE_BACKUP_DIRECTORY,
+    TIMEZONE,
 )
 
 
 BACKUP_TIME_FORMAT = "%d.%m.%Y %H:%M (GMT)"
-WINDOWS_BACKUP_TIME_FORMAT = "%d.%m.%Y %H-%M (GMT)"
+def _next_backup_time(now: datetime | None = None) -> datetime:
+    backup_timezone = ZoneInfo(TIMEZONE)
+    local_now = now.astimezone(backup_timezone) if now else datetime.now(backup_timezone)
+    scheduled_time = time(hour=SQLITE_AUTOBACKUP_HOUR)
+    next_run = datetime.combine(local_now.date(), scheduled_time, tzinfo=backup_timezone)
 
+    if next_run < local_now:
+        next_run = datetime.combine(
+            local_now.date() + timedelta(days=1),
+            scheduled_time,
+            tzinfo=backup_timezone,
+        )
 
-def _backup_time_from_folder(folder_name: str) -> datetime | None:
-    for time_format in (BACKUP_TIME_FORMAT, WINDOWS_BACKUP_TIME_FORMAT):
-        try:
-            return datetime.strptime(folder_name, time_format).replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
-
-
-def _latest_backup_time() -> datetime | None:
-    if not SQLITE_BACKUP_DIRECTORY.exists():
-        return None
-
-    backup_times = (
-        backup_time
-        for path in SQLITE_BACKUP_DIRECTORY.iterdir()
-        if path.is_dir()
-        for backup_time in [_backup_time_from_folder(path.name)]
-        if backup_time is not None
-    )
-    return max(backup_times, default=None)
+    return next_run
 
 
 def _seconds_until_next_backup() -> float:
-    latest_backup = _latest_backup_time()
-    if latest_backup is None:
-        return 0
-
-    elapsed = (datetime.now(timezone.utc) - latest_backup).total_seconds()
-    return max(0, SQLITE_AUTOBACKUP_INTERVAL_SECONDS - elapsed)
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    next_run_utc = _next_backup_time(now).astimezone(timezone.utc)
+    now_utc = now.astimezone(timezone.utc)
+    return max(0, (next_run_utc - now_utc).total_seconds())
 
 
 def create_sqlite_backup() -> str | None:
@@ -92,19 +82,19 @@ def create_sqlite_backup() -> str | None:
 
 
 async def periodic_sqlite_backup() -> None:
-    retry_seconds = min(SQLITE_AUTOBACKUP_INTERVAL_SECONDS, 60 * 60)
-
     while True:
-        try:
-            delay = await asyncio.to_thread(_seconds_until_next_backup)
-            if delay:
-                await asyncio.sleep(delay)
+        delay = _seconds_until_next_backup()
+        if delay:
+            await asyncio.sleep(delay)
 
-            backup_path = await asyncio.to_thread(create_sqlite_backup)
-            if backup_path is None:
-                await asyncio.sleep(retry_seconds)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logging.exception("[SQLite backup] Backup failed; retrying later")
-            await asyncio.sleep(retry_seconds)
+        while True:
+            try:
+                backup_path = await asyncio.to_thread(create_sqlite_backup)
+                if backup_path is None:
+                    logging.info("[SQLite backup] Skipping this run; no databases are available")
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.exception("[SQLite backup] Backup failed; retrying in 15 minutes")
+                await asyncio.sleep(15 * 60)

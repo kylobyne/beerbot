@@ -37,11 +37,10 @@ SQLITE_BACKUP_DIRECTORY.mkdir(exist_ok=True)
 SQLITE_AUTOBACKUP_ENABLED = os.getenv("SQLITE_AUTOBACKUP_ENABLED", "false").strip().lower() in {
     "1", "true", "yes", "on"
 }
-SQLITE_AUTOBACKUP_INTERVAL_SECONDS = int(
-    os.getenv("SQLITE_AUTOBACKUP_INTERVAL_SECONDS", str(24 * 60 * 60))
-)
-if SQLITE_AUTOBACKUP_INTERVAL_SECONDS <= 0:
-    raise ValueError("SQLITE_AUTOBACKUP_INTERVAL_SECONDS must be positive")
+# Автобекап запускается ежедневно в этот час по часовому поясу TIMEZONE.
+SQLITE_AUTOBACKUP_HOUR = 4
+if not 0 <= SQLITE_AUTOBACKUP_HOUR <= 23:
+    raise ValueError("SQLITE_AUTOBACKUP_HOUR must be between 0 and 23")
 
 # Пакеты дополнительных попыток: ключ — идентификатор варианта, attempts — число попыток,
 # stars — цена в Telegram Stars.
