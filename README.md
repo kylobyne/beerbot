@@ -241,6 +241,8 @@
 │   ├── payd_attemps.sqlite3  # Общая база платных попыток
 │   └── promo.sqlite3         # База промокодов
 │
+├── sqlite3_backups/          # Ежедневные резервные копии SQLite (не коммитятся)
+│
 ├── .venv/                    # Виртуальное окружение
 ├── .env                      # Переменные окружения
 ├── requirements.txt          # Зависимости
@@ -356,7 +358,9 @@ source .venv/bin/activate</code></pre>
 
 <p>Создайте файл <code>.env</code> в корне проекта:</p>
 
-<pre><code>BOT_TOKEN=ваш_токен_бота</code></pre>
+<pre><code>BOT_TOKEN=ваш_токен_бота
+SQLITE_AUTOBACKUP_ENABLED=false
+SQLITE_AUTOBACKUP_INTERVAL_SECONDS=86400</code></pre>
 
 <h3>5. Запуск бота</h3>
 
@@ -426,6 +430,12 @@ source .venv/bin/activate</code></pre>
     <li><strong>Интервал</strong>: раз в час</li>
     <li><strong>Действие</strong>: удаление просроченных инвойсов и деактивация промокодов с истекшим сроком действия</li>
 </ul>
+
+<h3>Автоматические резервные копии SQLite</h3>
+
+<p>Резервное копирование выключено по умолчанию. Чтобы включить его, задайте в <code>.env</code> значение <code>SQLITE_AUTOBACKUP_ENABLED=true</code>. Интервал по умолчанию — 86400 секунд (24 часа); если копий ещё нет, первая создаётся при запуске бота.</p>
+
+<p>Копии всех файлов <code>*.sqlite3</code> сохраняются через SQLite Backup API в отдельные папки вида <code>sqlite3_backups/ДД.ММ.ГГГГ ЧЧ:ММ (GMT)/</code>. На Windows двоеточие в имени заменяется дефисом. Каталог исключён из Git; старые копии автоматически не удаляются.</p>
 
 <hr>
 

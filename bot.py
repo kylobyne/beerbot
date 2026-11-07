@@ -5,7 +5,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeDefault
 
 # ДОБАВЛЕНО: Импортируем интервал очистки из конфигурации
-from config import TOKEN, DB_CLEAN_INTERVAL
+from config import TOKEN, DB_CLEAN_INTERVAL, SQLITE_AUTOBACKUP_ENABLED
+from sqlite_backup import periodic_sqlite_backup
 from database import delete_old_pending_invoices, deactivate_expired_promos  # ДОБАВЛЕНА deactivate_expired_promos
 # ШАГ 1: Добавляем admin в импорт (измените имя файла, если оно другое)
 from handlers import beer, buy, start, stats, admin, promo, mod
@@ -100,6 +101,8 @@ async def main():
 
     # Запускаем фоновую задачу
     asyncio.create_task(periodic_db_cleaner())
+    if SQLITE_AUTOBACKUP_ENABLED:
+        asyncio.create_task(periodic_sqlite_backup())
 
     await dp.start_polling(
         bot,

@@ -29,6 +29,20 @@ TIMEZONE = "Europe/Moscow"
 DATABASE_DIRECTORY = Path("sqlite3")
 DATABASE_DIRECTORY.mkdir(exist_ok=True)
 
+# Резервные копии SQLite хранятся отдельно от рабочих баз.
+SQLITE_BACKUP_DIRECTORY = Path("sqlite3_backups")
+SQLITE_BACKUP_DIRECTORY.mkdir(exist_ok=True)
+
+# Автобекап выключен по умолчанию; включение задаётся через .env или окружение процесса.
+SQLITE_AUTOBACKUP_ENABLED = os.getenv("SQLITE_AUTOBACKUP_ENABLED", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+SQLITE_AUTOBACKUP_INTERVAL_SECONDS = int(
+    os.getenv("SQLITE_AUTOBACKUP_INTERVAL_SECONDS", str(24 * 60 * 60))
+)
+if SQLITE_AUTOBACKUP_INTERVAL_SECONDS <= 0:
+    raise ValueError("SQLITE_AUTOBACKUP_INTERVAL_SECONDS must be positive")
+
 # Пакеты дополнительных попыток: ключ — идентификатор варианта, attempts — число попыток,
 # stars — цена в Telegram Stars.
 BUY_OPTIONS = {
