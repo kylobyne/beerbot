@@ -1,7 +1,11 @@
+import logging
+
 from aiogram import Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from handlers.ephemeral import send_ephemeral_message
 import messages
 
 
@@ -10,18 +14,33 @@ router = Router()
 
 
 @router.message(Command("start"))
-async def command_start(message:Message):
+async def command_start(message: Message):
+    if not message.from_user:
+        return
 
     if message.chat.type == "private":
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            logging.warning("Could not delete /start message %s", message.message_id)
 
-        await message.answer(
-            messages.START_PRIVATE,
-            parse_mode="HTML"
+        await message.answer(messages.START_PRIVATE, parse_mode="HTML")
+        return
+
+    ephemeral_message_id = message.ephemeral_message_id
+    if ephemeral_message_id is None:
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            logging.warning("Could not delete /start message %s", message.message_id)
+
+    try:
+        await send_ephemeral_message(
+            bot=message.bot,
+            chat_id=message.chat.id,
+            receiver_user_id=message.from_user.id,
+            text=messages.HELP,
+            reply_to_ephemeral_id=ephemeral_message_id,
         )
-
-    else:
-
-        await message.answer(
-            messages.HELP,
-            parse_mode="HTML"
-        )
+    except TelegramAPIError:
+        logging.exception("Could not send ephemeral /start response to user %s", message.from_user.id)

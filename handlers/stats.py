@@ -1,9 +1,11 @@
 import html
+import logging
 import time
 import math
 import asyncio
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import (
     Message,
@@ -14,6 +16,7 @@ from aiogram.utils.keyboard import (
 )
 
 import messages
+from handlers.ephemeral import send_ephemeral_message
 from database import (
     get_leaderboard,
     update_user_name
@@ -47,7 +50,7 @@ def get_rank_emoji(rank: int):
     )
 
 
-def leaderboard_keyboard(page, pages):
+def leaderboard_keyboard(chat_id, page, pages):
     if pages <= 1:
         return None
 
@@ -56,19 +59,19 @@ def leaderboard_keyboard(page, pages):
     if page > 0:
         builder.button(
             text="◀️",
-            callback_data=f"beer_top:{page-1}",
+            callback_data=f"beer_top:{chat_id}:{page-1}",
             style="success"
         )
 
     builder.button(
         text=f"{page+1}/{pages}",
-        callback_data="beer_top:current"
+        callback_data=f"beer_top:{chat_id}:current"
     )
 
     if page < pages - 1:
         builder.button(
             text="▶️",
-            callback_data=f"beer_top:{page+1}",
+            callback_data=f"beer_top:{chat_id}:{page+1}",
             style="success"
         )
 
@@ -139,35 +142,65 @@ async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
         )
 
     full_text = "\n".join(lines) + messages.TEXT_INFO
-    keyboard = leaderboard_keyboard(page, total_pages)
+    keyboard = leaderboard_keyboard(chat_id, page, total_pages)
 
     return full_text, keyboard
 
 
 @router.message(Command("stats"))
 async def command_stats(message: Message):
-    if message.chat.type == "private":
-        await message.reply(
-            messages.PRIVATE_DISABLED,
-            parse_mode="HTML"
-        )
+    if not message.from_user:
         return
 
-    if message.from_user:
-        update_user_name(
-            message.chat.id,
-            message.from_user.id,
-            message.from_user.full_name
-        )
+    if message.chat.type == "private":
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            logging.warning("Could not delete /stats message %s", message.message_id)
 
-    # Генерируем 1-ю страницу топа (индекс 0)
+        await message.answer(messages.PRIVATE_DISABLED, parse_mode="HTML")
+        return
+
+    ephemeral_message_id = message.ephemeral_message_id
+    if ephemeral_message_id is None:
+        try:
+            await message.delete()
+        except TelegramAPIError:
+            logging.warning("Could not delete /stats message %s", message.message_id)
+
+    try:
+        response = await send_ephemeral_message(
+            bot=message.bot,
+            chat_id=message.chat.id,
+            receiver_user_id=message.from_user.id,
+            text="Подготавливаю статистику…",
+            reply_to_ephemeral_id=ephemeral_message_id,
+        )
+    except TelegramAPIError:
+        logging.exception("Could not send ephemeral /stats response to user %s", message.from_user.id)
+        return
+    update_user_name(
+        message.chat.id,
+        message.from_user.id,
+        message.from_user.full_name
+    )
     text, reply_markup = await get_valid_leaderboard_text(message.bot, message.chat.id, 0)
 
-    await message.answer(
-        text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
+    if response.ephemeral_message_id is None:
+        logging.error("Telegram returned no ephemeral message ID for /stats")
+        return
+
+    try:
+        await message.bot.edit_ephemeral_message_text(
+            chat_id=message.chat.id,
+            receiver_user_id=message.from_user.id,
+            ephemeral_message_id=response.ephemeral_message_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    except TelegramAPIError:
+        logging.exception("Could not update ephemeral /stats response for user %s", message.from_user.id)
 
 
 @router.callback_query(F.data.startswith("beer_top:"))
@@ -175,8 +208,17 @@ async def leaderboard_pagination(callback: CallbackQuery):
     if not callback.message:
         return
 
-    chat_id = callback.message.chat.id
-    value = callback.data.split(":")[1]
+    parts = callback.data.split(":")
+    if len(parts) == 3:
+        try:
+            chat_id = int(parts[1])
+        except ValueError:
+            await callback.answer(messages.INVALID_PAGE, show_alert=True)
+            return
+        value = parts[2]
+    else:
+        chat_id = callback.message.chat.id
+        value = parts[1]
 
     if value == "current":
         await callback.answer("Вы на этой странице", show_alert=False)
@@ -203,10 +245,21 @@ async def leaderboard_pagination(callback: CallbackQuery):
     # Генерируем запрошенную страницу
     text, reply_markup = await get_valid_leaderboard_text(callback.message.bot, chat_id, page)
 
-    await callback.message.edit_text(
-        text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
+    ephemeral_message_id = getattr(callback.message, "ephemeral_message_id", None)
+    if ephemeral_message_id is not None:
+        await callback.bot.edit_ephemeral_message_text(
+            chat_id=chat_id,
+            receiver_user_id=callback.from_user.id,
+            ephemeral_message_id=ephemeral_message_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.edit_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
 
     await callback.answer()

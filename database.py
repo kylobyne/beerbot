@@ -41,6 +41,97 @@ def get_connection(chat_id: int):
         """
     )
 
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS drink_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            full_name TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK (outcome IN ('success', 'cooldown')),
+            liters REAL NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS drink_identities (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            full_name TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mod_permissions (
+            user_id INTEGER NOT NULL,
+            permission TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            updated_by INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (user_id, permission)
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS drink_bans (
+            user_id INTEGER PRIMARY KEY,
+            banned_by INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS drink_ban_notices (
+            user_id INTEGER PRIMARY KEY,
+            last_sent_at INTEGER NOT NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mod_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            target_id INTEGER,
+            details TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_drink_attempts_user_created
+        ON drink_attempts (user_id, created_at)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_drink_attempts_created
+        ON drink_attempts (created_at)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_drink_identities_username
+        ON drink_identities (username COLLATE NOCASE)
+        """
+    )
+
     connection.commit()
 
     return connection
@@ -178,6 +269,226 @@ def update_user_name(
         )
 
         connection.commit()
+
+
+def remember_drinking_user(
+    chat_id: int,
+    user_id: int,
+    username: str | None,
+    full_name: str,
+    updated_at: int | None = None,
+):
+    now = updated_at if updated_at is not None else int(time.time())
+    with get_connection(chat_id) as connection:
+        connection.execute(
+            """
+            INSERT INTO drink_identities (user_id, username, full_name, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username,
+                full_name = excluded.full_name,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, username, full_name, now),
+        )
+
+
+def resolve_drinking_user(chat_id: int, username: str) -> int | None:
+    normalized_username = username.lstrip("@").casefold()
+    with get_connection(chat_id) as connection:
+        row = connection.execute(
+            """
+            SELECT user_id
+            FROM drink_identities
+            WHERE username = ? COLLATE NOCASE
+            """,
+            (normalized_username,),
+        ).fetchone()
+    return int(row["user_id"]) if row else None
+
+
+def record_drink_attempt(
+    chat_id: int,
+    user_id: int,
+    username: str | None,
+    full_name: str,
+    outcome: str,
+    liters: float = 0,
+    created_at: int | None = None,
+):
+    timestamp = created_at if created_at is not None else int(time.time())
+    cutoff = timestamp - 48 * 60 * 60
+    with get_connection(chat_id) as connection:
+        connection.execute(
+            """
+            INSERT INTO drink_attempts
+                (user_id, username, full_name, outcome, liters, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, username, full_name, outcome, liters, timestamp),
+        )
+        connection.execute(
+            "DELETE FROM drink_attempts WHERE created_at < ?",
+            (cutoff,),
+        )
+        connection.execute(
+            """
+            INSERT INTO drink_identities (user_id, username, full_name, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username,
+                full_name = excluded.full_name,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, username, full_name, timestamp),
+        )
+
+
+def get_drink_history(chat_id: int, user_id: int, since: int | None = None):
+    cutoff = since if since is not None else int(time.time()) - 48 * 60 * 60
+    with get_connection(chat_id) as connection:
+        rows = connection.execute(
+            """
+            SELECT outcome, liters, full_name, created_at
+            FROM drink_attempts
+            WHERE user_id = ? AND created_at >= ? AND outcome = 'success'
+            ORDER BY created_at DESC
+            LIMIT 50
+            """,
+            (user_id, cutoff),
+        ).fetchall()
+        counts = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS attempts,
+                COALESCE(SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END), 0) AS successes
+            FROM drink_attempts
+            WHERE user_id = ? AND created_at >= ?
+            """,
+            (user_id, cutoff),
+        ).fetchone()
+    return rows, int(counts["attempts"]), int(counts["successes"])
+
+
+def get_mod_permissions(chat_id: int, user_id: int) -> dict[str, bool]:
+    with get_connection(chat_id) as connection:
+        rows = connection.execute(
+            """
+            SELECT permission, enabled
+            FROM mod_permissions
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchall()
+    return {row["permission"]: bool(row["enabled"]) for row in rows}
+
+
+def set_mod_permission(
+    chat_id: int,
+    user_id: int,
+    permission: str,
+    enabled: bool,
+    updated_by: int,
+):
+    with get_connection(chat_id) as connection:
+        connection.execute(
+            """
+            INSERT INTO mod_permissions
+                (user_id, permission, enabled, updated_by, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, permission) DO UPDATE SET
+                enabled = excluded.enabled,
+                updated_by = excluded.updated_by,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, permission, int(enabled), updated_by, int(time.time())),
+        )
+
+
+def is_drink_banned(chat_id: int, user_id: int) -> bool:
+    with get_connection(chat_id) as connection:
+        row = connection.execute(
+            "SELECT 1 FROM drink_bans WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    return row is not None
+
+
+def claim_drink_ban_notice(
+    chat_id: int,
+    user_id: int,
+    now: int | None = None,
+) -> bool:
+    timestamp = now if now is not None else int(time.time())
+    with get_connection(chat_id) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT last_sent_at FROM drink_ban_notices WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if row and timestamp - row["last_sent_at"] < 60:
+            return False
+
+        connection.execute(
+            """
+            INSERT INTO drink_ban_notices (user_id, last_sent_at)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET last_sent_at = excluded.last_sent_at
+            """,
+            (user_id, timestamp),
+        )
+    return True
+
+
+def ban_drinking(chat_id: int, user_id: int, banned_by: int) -> bool:
+    with get_connection(chat_id) as connection:
+        cursor = connection.execute(
+            """
+            INSERT OR IGNORE INTO drink_bans (user_id, banned_by, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, banned_by, int(time.time())),
+        )
+    return cursor.rowcount > 0
+
+
+def unban_drinking(chat_id: int, user_id: int) -> bool:
+    with get_connection(chat_id) as connection:
+        cursor = connection.execute(
+            "DELETE FROM drink_bans WHERE user_id = ?",
+            (user_id,),
+        )
+    return cursor.rowcount > 0
+
+
+def record_mod_audit(
+    chat_id: int,
+    actor_id: int,
+    action: str,
+    target_id: int | None = None,
+    details: str = "",
+):
+    with get_connection(chat_id) as connection:
+        connection.execute(
+            """
+            INSERT INTO mod_audit (actor_id, action, target_id, details, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (actor_id, action, target_id, details, int(time.time())),
+        )
+
+
+def get_mod_audit(chat_id: int, limit: int = 20):
+    with get_connection(chat_id) as connection:
+        return connection.execute(
+            """
+            SELECT actor_id, action, target_id, details, created_at
+            FROM mod_audit
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
 
 
 # ============================================================

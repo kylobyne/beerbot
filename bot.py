@@ -2,12 +2,13 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeDefault
 
 # ДОБАВЛЕНО: Импортируем интервал очистки из конфигурации
 from config import TOKEN, DB_CLEAN_INTERVAL
 from database import delete_old_pending_invoices, deactivate_expired_promos  # ДОБАВЛЕНА deactivate_expired_promos
 # ШАГ 1: Добавляем admin в импорт (измените имя файла, если оно другое)
-from handlers import beer, buy, start, stats, admin, promo
+from handlers import beer, buy, start, stats, admin, promo, mod
 
 
 # Фоновая задача для периодической очистки базы данных
@@ -25,6 +26,52 @@ async def periodic_db_cleaner():
         await asyncio.sleep(DB_CLEAN_INTERVAL)
 
 
+async def configure_group_commands(bot: Bot):
+    group_scope = BotCommandScopeAllGroupChats()
+    default_scope = BotCommandScopeDefault()
+    default_commands = await bot.get_my_commands(scope=default_scope)
+    filtered_default_commands = [
+        command for command in default_commands
+        if command.command != "admin"
+    ]
+    if len(filtered_default_commands) != len(default_commands):
+        await bot.set_my_commands(filtered_default_commands, scope=default_scope)
+
+    commands = await bot.get_my_commands(scope=group_scope)
+    if not commands:
+        commands = list(filtered_default_commands)
+
+    if not commands:
+        commands = [
+            BotCommand(command="start", description="Информация о боте"),
+            BotCommand(command="beer", description="Выпить виртуальное пиво"),
+            BotCommand(command="buy", description="Купить дополнительные попытки"),
+            BotCommand(command="stats", description="Показать рейтинг"),
+            BotCommand(command="promo", description="Активировать промокод"),
+            BotCommand(command="mod", description="Модерация чата"),
+        ]
+
+    commands = [command for command in commands if command.command != "admin"]
+    known_commands = {command.command for command in commands}
+    for command, description in (
+        ("start", "Информация о боте"),
+        ("stats", "Показать рейтинг"),
+        ("mod", "Модерация чата"),
+    ):
+        if command not in known_commands:
+            commands.append(BotCommand(command=command, description=description))
+
+    commands = [
+        BotCommand(
+            command=command.command,
+            description=command.description,
+            is_ephemeral=True if command.command in {"start", "stats", "mod"} else command.is_ephemeral,
+        )
+        for command in commands
+    ]
+    await bot.set_my_commands(commands, scope=group_scope)
+
+
 async def main():
 
     logging.basicConfig(
@@ -34,8 +81,12 @@ async def main():
 
     logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 
+    if not TOKEN:
+        raise RuntimeError("Задайте BOT_TOKEN в файле .env")
+
     bot = Bot(TOKEN)
     dp = Dispatcher()
+    await configure_group_commands(bot)
 
     # ШАГ 2: Регистрируем админский роутер в диспетчере первым
    
@@ -44,6 +95,7 @@ async def main():
     dp.include_router(buy.router)
     dp.include_router(stats.router)
     dp.include_router(promo.router)
+    dp.include_router(mod.router)
     dp.include_router(admin.router)
 
     # Запускаем фоновую задачу

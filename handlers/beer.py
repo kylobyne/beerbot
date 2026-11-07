@@ -11,7 +11,11 @@ from config import COOLDOWN_SECONDS
 from database import (
     drink,
     drink_paid,
-    use_paid_attempt
+    use_paid_attempt,
+    is_drink_banned,
+    claim_drink_ban_notice,
+    record_drink_attempt,
+    remember_drinking_user,
 )
 
 
@@ -52,6 +56,18 @@ async def command_beer(message: Message):
 
 
     name = message.from_user.full_name
+    username = message.from_user.username
+
+    if is_drink_banned(message.chat.id, message.from_user.id):
+        remember_drinking_user(
+            message.chat.id,
+            message.from_user.id,
+            username,
+            name,
+        )
+        if claim_drink_ban_notice(message.chat.id, message.from_user.id):
+            await message.reply(messages.DRINKING_BANNED, parse_mode="HTML")
+        return
 
 
     success, value, total_liters = drink(
@@ -79,6 +95,15 @@ async def command_beer(message: Message):
                 name
             )
 
+            record_drink_attempt(
+                message.chat.id,
+                message.from_user.id,
+                username,
+                name,
+                "success",
+                value,
+            )
+
 
             await message.reply(
                 messages.DRINK_NEXT.format(
@@ -97,6 +122,13 @@ async def command_beer(message: Message):
             return
 
 
+        record_drink_attempt(
+            message.chat.id,
+            message.from_user.id,
+            username,
+            name,
+            "cooldown",
+        )
 
         minutes, seconds = divmod(
             int(value),
@@ -119,6 +151,14 @@ async def command_beer(message: Message):
         return
 
 
+    record_drink_attempt(
+        message.chat.id,
+        message.from_user.id,
+        username,
+        name,
+        "success",
+        value,
+    )
 
     minutes, seconds = divmod(
         COOLDOWN_SECONDS,
