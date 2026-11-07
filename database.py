@@ -17,6 +17,13 @@ from time_utils import (
 )
 
 
+DRINK_ATTEMPT_RETENTION_SECONDS = 7 * 24 * 60 * 60
+PATTERN_ANALYSIS_WINDOW_SECONDS = 7 * 24 * 60 * 60
+PATTERN_ANALYSIS_MAX_ATTEMPTS = 101  # At most 100 adjacent intervals are scored.
+AUTOFARM_DEFAULT_RANDOM_SPAN_SECONDS = 30 * 60 - 60  # Plugin fallback: random.randint(60, 1800).
+PATTERN_MIN_INTERVALS = 4
+
+
 def database_path(chat_id: int):
     safe_chat_id = re.sub(
         r"[^0-9-]",
@@ -137,6 +144,14 @@ def get_connection(chat_id: int):
         """
         CREATE INDEX IF NOT EXISTS idx_drink_attempts_created
         ON drink_attempts (created_at)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_drink_attempts_free_success
+        ON drink_attempts (user_id, created_at DESC)
+        WHERE outcome = 'success' AND cooldown_delay_seconds IS NOT NULL
         """
     )
 
@@ -342,7 +357,7 @@ def record_drink_attempt(
     cooldown_delay_seconds: float | None = None,
 ):
     timestamp = created_at if created_at is not None else int(time.time())
-    cutoff = timestamp - 48 * 60 * 60
+    cutoff = timestamp - DRINK_ATTEMPT_RETENTION_SECONDS
     with get_connection(chat_id) as connection:
         connection.execute(
             """
@@ -417,6 +432,78 @@ def get_drink_accuracy(
         ).fetchone()
     samples = int(row["samples"])
     return (float(row["accuracy"]) if samples else None, samples)
+
+
+def get_drink_pattern_match(
+    chat_id: int,
+    user_id: int,
+    since: int | None = None,
+) -> tuple[float | None, int]:
+    """Estimate how often recent free-drink intervals match AutoFarm-like schedules.
+
+    The score is the best fit of a steady interval with random delay or a
+    steadily increasing interval, using at most 100 intervals.
+    """
+    now = int(time.time())
+    cutoff = max(
+        since if since is not None else now - PATTERN_ANALYSIS_WINDOW_SECONDS,
+        now - PATTERN_ANALYSIS_WINDOW_SECONDS,
+    )
+    with get_connection(chat_id) as connection:
+        rows = connection.execute(
+            """
+            SELECT created_at
+            FROM drink_attempts
+            WHERE user_id = ?
+                AND created_at >= ?
+                AND outcome = 'success'
+                AND cooldown_delay_seconds IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, cutoff, PATTERN_ANALYSIS_MAX_ATTEMPTS),
+        ).fetchall()
+
+    timestamps = [int(row["created_at"]) for row in reversed(rows)]
+    intervals = [
+        later - earlier
+        for earlier, later in zip(timestamps, timestamps[1:])
+        if later > earlier
+    ]
+    interval_count = len(intervals)
+    if interval_count < PATTERN_MIN_INTERVALS:
+        return None, interval_count
+
+    # Model 1: a fixed base interval plus the plugin's default 1–30 minute jitter.
+    ordered = sorted(intervals)
+    left = 0
+    best_steady_matches = 0
+    for right, current in enumerate(ordered):
+        while current - ordered[left] > AUTOFARM_DEFAULT_RANDOM_SPAN_SECONDS:
+            left += 1
+        best_steady_matches = max(best_steady_matches, right - left + 1)
+
+    # Model 2: the plugin can add an accumulating delay after every send.
+    mean_index = (interval_count - 1) / 2
+    mean_interval = sum(intervals) / interval_count
+    index_variance = sum((index - mean_index) ** 2 for index in range(interval_count))
+    slope = sum(
+        (index - mean_index) * (interval - mean_interval)
+        for index, interval in enumerate(intervals)
+    ) / index_variance
+    intercept = mean_interval - slope * mean_index
+    jitter_tolerance = AUTOFARM_DEFAULT_RANDOM_SPAN_SECONDS / 2
+    increasing_matches = (
+        sum(
+            abs(interval - (intercept + slope * index)) <= jitter_tolerance
+            for index, interval in enumerate(intervals)
+        )
+        if slope >= 0
+        else 0
+    )
+
+    matched_intervals = max(best_steady_matches, increasing_matches)
+    return 100.0 * matched_intervals / interval_count, interval_count
 
 
 def get_mod_permissions(chat_id: int, user_id: int) -> dict[str, bool]:

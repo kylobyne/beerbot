@@ -256,7 +256,14 @@ async def render_admin_permissions(callback: CallbackQuery, target_id: int):
     )
 
 
-def history_text(target_id: int, rows, accuracy: float | None, successes: int):
+def history_text(
+    target_id: int,
+    rows,
+    accuracy: float | None,
+    successes: int,
+    pattern_match: float | None,
+    pattern_samples: int,
+):
     if rows:
         name = html.escape(rows[0]["full_name"])
         lines = [f"<b>История питья за 48 часов · {name}</b> · ID <code>{target_id}</code>"]
@@ -267,6 +274,19 @@ def history_text(target_id: int, rows, accuracy: float | None, successes: int):
             lines.append(f"Показаны последние {len(rows)} успешных попыток из {successes}.")
     else:
         lines = [f"<b>История питья за 48 часов</b> · ID <code>{target_id}</code>", "Успешных попыток нет."]
+
+    if pattern_match is None:
+        lines.append(
+            "Совпадение ритма AutoFarm за 7 дней: недостаточно данных "
+            f"(нужно не менее {database.PATTERN_MIN_INTERVALS + 1} успешных бесплатных попыток)."
+        )
+    else:
+        lines.append(
+            f"Совпадение ритма AutoFarm за 7 дней: {round(pattern_match)}% "
+            f"({pattern_samples} интервалов). Оценка учитывает повторяющийся интервал "
+            "случайную добавку по умолчанию до 30 минут и нарастающую задержку; "
+            "это эвристика, не доказательство использования плагина."
+        )
 
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -346,7 +366,18 @@ async def command_mod(message: Message):
         database.record_mod_audit(message.chat.id, message.from_user.id, "view_history", target_id)
         rows, attempts, successes = database.get_drink_history(message.chat.id, target_id)
         accuracy, _ = database.get_drink_accuracy(message.chat.id, target_id)
-        text, keyboard = history_text(target_id, rows, accuracy, successes)
+        pattern_match, pattern_samples = database.get_drink_pattern_match(
+            message.chat.id,
+            target_id,
+        )
+        text, keyboard = history_text(
+            target_id,
+            rows,
+            accuracy,
+            successes,
+            pattern_match,
+            pattern_samples,
+        )
         await answer_ephemerally(message, text, keyboard)
         return
 
