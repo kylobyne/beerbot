@@ -19,11 +19,6 @@ async def command_start(message: Message):
         return
 
     if message.chat.type == "private":
-        try:
-            await message.delete()
-        except TelegramAPIError:
-            logging.warning("Could not delete /start message %s", message.message_id)
-
         await message.answer(messages.START_PRIVATE, parse_mode="HTML")
         return
 

@@ -153,11 +153,6 @@ async def command_stats(message: Message):
         return
 
     if message.chat.type == "private":
-        try:
-            await message.delete()
-        except TelegramAPIError:
-            logging.warning("Could not delete /stats message %s", message.message_id)
-
         await message.answer(messages.PRIVATE_DISABLED, parse_mode="HTML")
         return
 
