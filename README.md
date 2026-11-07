@@ -432,7 +432,7 @@ SQLITE_AUTOBACKUP_ENABLED=false</code></pre>
 
 <h3>Автоматические резервные копии SQLite</h3>
 
-<p>Резервное копирование выключено по умолчанию. Чтобы включить его, задайте в <code>.env</code> значение <code>SQLITE_AUTOBACKUP_ENABLED=true</code>. Копии создаются ежедневно в 04:00 по часовому поясу <code>TIMEZONE</code> из <code>config.py</code>; первая копия появится при ближайшем запуске по расписанию.</p>
+<p>Резервное копирование выключено по умолчанию. Чтобы включить его, задайте в <code>.env</code> значение <code>SQLITE_AUTOBACKUP_ENABLED=true</code>. Период задаётся в днях через <code>SQLITE_AUTOBACKUP_INTERVAL_DAYS</code> в <code>config.py</code> (по умолчанию 1); время — <code>SQLITE_AUTOBACKUP_HOUR</code> (04:00), часовой пояс — <code>TIMEZONE</code> из <code>config.py</code>. Следующая дата отсчитывается от даты последней копии. Если копий ещё нет, первая появится при ближайшем запуске по расписанию.</p>
 
 <p>Копии всех файлов <code>*.sqlite3</code> сохраняются через SQLite Backup API в отдельные папки вида <code>sqlite3_backups/ДД.ММ.ГГГГ ЧЧ:ММ (GMT)/</code>. На Windows двоеточие в имени заменяется дефисом. Каталог исключён из Git; старые копии автоматически не удаляются.</p>
 

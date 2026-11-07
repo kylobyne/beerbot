@@ -11,24 +11,59 @@ from zoneinfo import ZoneInfo
 from config import (
     DATABASE_DIRECTORY,
     SQLITE_AUTOBACKUP_HOUR,
+    SQLITE_AUTOBACKUP_INTERVAL_DAYS,
     SQLITE_BACKUP_DIRECTORY,
     TIMEZONE,
 )
 
 
 BACKUP_TIME_FORMAT = "%d.%m.%Y %H:%M (GMT)"
+WINDOWS_BACKUP_TIME_FORMAT = "%d.%m.%Y %H-%M (GMT)"
+
+
+def _backup_time_from_folder(folder_name: str) -> datetime | None:
+    for time_format in (BACKUP_TIME_FORMAT, WINDOWS_BACKUP_TIME_FORMAT):
+        try:
+            return datetime.strptime(folder_name, time_format).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def _latest_backup_time() -> datetime | None:
+    if not SQLITE_BACKUP_DIRECTORY.exists():
+        return None
+
+    backup_times = (
+        backup_time
+        for path in SQLITE_BACKUP_DIRECTORY.iterdir()
+        if path.is_dir()
+        for backup_time in [_backup_time_from_folder(path.name)]
+        if backup_time is not None
+    )
+    return max(backup_times, default=None)
+
+
 def _next_backup_time(now: datetime | None = None) -> datetime:
     backup_timezone = ZoneInfo(TIMEZONE)
     local_now = now.astimezone(backup_timezone) if now else datetime.now(backup_timezone)
     scheduled_time = time(hour=SQLITE_AUTOBACKUP_HOUR)
-    next_run = datetime.combine(local_now.date(), scheduled_time, tzinfo=backup_timezone)
+    latest_backup = _latest_backup_time()
 
+    if latest_backup is not None:
+        last_backup_date = latest_backup.astimezone(backup_timezone).date()
+        next_date = last_backup_date + timedelta(days=SQLITE_AUTOBACKUP_INTERVAL_DAYS)
+    else:
+        next_date = local_now.date()
+
+    next_run = datetime.combine(next_date, scheduled_time, tzinfo=backup_timezone)
     if next_run < local_now:
-        next_run = datetime.combine(
-            local_now.date() + timedelta(days=1),
-            scheduled_time,
-            tzinfo=backup_timezone,
-        )
+        # After downtime, catch up at the next 04:00 instead of skipping an interval.
+        next_date = local_now.date()
+        next_run = datetime.combine(next_date, scheduled_time, tzinfo=backup_timezone)
+        if next_run < local_now:
+            next_date += timedelta(days=1)
+            next_run = datetime.combine(next_date, scheduled_time, tzinfo=backup_timezone)
 
     return next_run
 
