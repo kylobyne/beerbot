@@ -13,6 +13,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import database
 from handlers.ephemeral import send_ephemeral_message
+import messages
 
 
 router = Router()
@@ -269,7 +270,7 @@ async def command_mod(message: Message):
         return
 
     if message.chat.type == "private":
-        await message.answer("/mod доступна только в групповых чатах.")
+        await message.answer(messages.PRIVATE_DISABLED, parse_mode="HTML")
         return
 
     await delete_command_message(message)

@@ -34,12 +34,26 @@ async def command_start(message: Message):
         except TelegramAPIError:
             logging.warning("Could not delete /start message %s", message.message_id)
 
+    help_text = messages.HELP
+    try:
+        member = await message.bot.get_chat_member(
+            message.chat.id,
+            message.from_user.id,
+        )
+        if member.status in {"creator", "administrator"}:
+            help_text += f"\n{messages.MOD_HELP}"
+    except TelegramAPIError:
+        logging.warning(
+            "Could not check /start caller status in chat %s",
+            message.chat.id,
+        )
+
     try:
         await send_ephemeral_message(
             bot=message.bot,
             chat_id=message.chat.id,
             receiver_user_id=message.from_user.id,
-            text=messages.HELP,
+            text=help_text,
             reply_to_ephemeral_id=ephemeral_message_id,
         )
     except TelegramAPIError:
