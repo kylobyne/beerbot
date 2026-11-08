@@ -1,7 +1,8 @@
 .env
 __pycache__/
 sqlite3/*.sqlite3
-sqlite3_backups/
+sqlite3_backups/**
+!sqlite3_backups/.gitkeep
 .venv
 .vscode
 start.bat

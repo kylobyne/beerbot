@@ -30,6 +30,7 @@ TEXT_INFO = "\n\n<i>Чтобы попасть в этот список, начн
 INVALID_PAGE = "Не удалось открыть страницу топа."
 PAGINATION_COOLDOWN = "Пожалуйста, подождите {seconds} сек."
 TOO_FAST = "Не так быстро!"
+STATS_TOO_FAST = "<i>Слишком быстро: подождите!</i>"
 RANK_EMOJIS = {
     1: '<tg-emoji emoji-id="5440539497383087970">🥇</tg-emoji>',
     2: '<tg-emoji emoji-id="5447203607294265305">🥈</tg-emoji>',

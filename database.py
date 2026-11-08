@@ -48,10 +48,25 @@ def get_connection(chat_id: int):
             user_id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             total_liters REAL NOT NULL DEFAULT 0,
-            last_drink INTEGER NOT NULL DEFAULT 0
+            last_drink INTEGER NOT NULL DEFAULT 0,
+            is_member INTEGER NOT NULL DEFAULT 1,
+            membership_checked INTEGER NOT NULL DEFAULT 0
         )
         """
     )
+
+    drinker_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(drinkers)")
+    }
+    if "is_member" not in drinker_columns:
+        connection.execute(
+            "ALTER TABLE drinkers ADD COLUMN is_member INTEGER NOT NULL DEFAULT 1"
+        )
+    if "membership_checked" not in drinker_columns:
+        connection.execute(
+            "ALTER TABLE drinkers ADD COLUMN membership_checked INTEGER NOT NULL DEFAULT 0"
+        )
 
     connection.execute(
         """
@@ -194,10 +209,19 @@ def drink(chat_id: int, user_id: int, name: str):
                     connection.execute(
                         """
                         UPDATE drinkers
-                        SET name = ?
+                        SET name = ?, is_member = 1, membership_checked = 1
                         WHERE user_id = ?
                         """,
                         (name, user_id)
+                    )
+                else:
+                    connection.execute(
+                        """
+                        UPDATE drinkers
+                        SET is_member = 1, membership_checked = 1
+                        WHERE user_id = ?
+                        """,
+                        (user_id,)
                     )
 
                 return (
@@ -236,6 +260,10 @@ def drink(chat_id: int, user_id: int, name: str):
 
             name = excluded.name,
 
+            is_member = 1,
+
+            membership_checked = 1,
+
             total_liters =
             ROUND(
                 drinkers.total_liters +
@@ -268,7 +296,7 @@ def drink(chat_id: int, user_id: int, name: str):
 
 
 def get_leaderboard(chat_id: int):
-    """Возвращает ВСЕХ пользователей чата с литрами >= 0.1 для последующей фильтрации."""
+    """Возвращает участников чата с литрами >= 0.1 в порядке рейтинга."""
     with get_connection(chat_id) as connection:
         rows = connection.execute(
             """
@@ -277,7 +305,7 @@ def get_leaderboard(chat_id: int):
                 name,
                 total_liters
             FROM drinkers
-            WHERE total_liters >= 0.1
+            WHERE total_liters >= 0.1 AND is_member = 1
             ORDER BY
                 total_liters DESC,
                 name COLLATE NOCASE ASC
@@ -298,7 +326,7 @@ def update_user_name(
         connection.execute(
             """
             UPDATE drinkers
-            SET name = ?
+            SET name = ?, is_member = 1, membership_checked = 1
             WHERE user_id = ?
             """,
             (
@@ -307,6 +335,58 @@ def update_user_name(
             )
         )
 
+        connection.commit()
+
+
+def get_unchecked_drinker_ids(chat_id: int) -> list[int]:
+    """Returns ranked users whose membership has not been reconciled yet."""
+    with get_connection(chat_id) as connection:
+        rows = connection.execute(
+            """
+            SELECT user_id
+            FROM drinkers
+            WHERE total_liters >= 0.1 AND membership_checked = 0
+            ORDER BY total_liters DESC
+            """
+        ).fetchall()
+
+    return [row["user_id"] for row in rows]
+
+
+def update_unchecked_drinker_memberships(
+    chat_id: int,
+    memberships: dict[int, bool],
+) -> None:
+    """Save successful background checks without overwriting newer member events."""
+    if not memberships:
+        return
+
+    with get_connection(chat_id) as connection:
+        connection.executemany(
+            """
+            UPDATE drinkers
+            SET is_member = ?, membership_checked = 1
+            WHERE user_id = ? AND membership_checked = 0
+            """,
+            [
+                (int(is_member), user_id)
+                for user_id, is_member in memberships.items()
+            ],
+        )
+        connection.commit()
+
+
+def set_drinker_membership(chat_id: int, user_id: int, is_member: bool) -> None:
+    """Save a membership update received from Telegram."""
+    with get_connection(chat_id) as connection:
+        connection.execute(
+            """
+            UPDATE drinkers
+            SET is_member = ?, membership_checked = 1
+            WHERE user_id = ?
+            """,
+            (int(is_member), user_id),
+        )
         connection.commit()
 
 
@@ -384,7 +464,13 @@ def record_drink_attempt(
         )
 
 
-def get_drink_history(chat_id: int, user_id: int, since: int | None = None):
+def get_drink_history(
+    chat_id: int,
+    user_id: int,
+    since: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
     cutoff = since if since is not None else int(time.time()) - 48 * 60 * 60
     with get_connection(chat_id) as connection:
         rows = connection.execute(
@@ -392,10 +478,10 @@ def get_drink_history(chat_id: int, user_id: int, since: int | None = None):
             SELECT outcome, liters, full_name, created_at
             FROM drink_attempts
             WHERE user_id = ? AND created_at >= ? AND outcome = 'success'
-            ORDER BY created_at DESC
-            LIMIT 50
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
             """,
-            (user_id, cutoff),
+            (user_id, cutoff, limit, offset),
         ).fetchall()
         counts = connection.execute(
             """
@@ -623,16 +709,66 @@ def record_mod_audit(
         )
 
 
-def get_mod_audit(chat_id: int, limit: int = 20):
+def get_mod_audit(chat_id: int, limit: int = 20, offset: int = 0):
     with get_connection(chat_id) as connection:
         return connection.execute(
             """
-            SELECT actor_id, action, target_id, details, created_at
-            FROM mod_audit
+            WITH ordered AS (
+                SELECT
+                    id,
+                    actor_id,
+                    action,
+                    target_id,
+                    details,
+                    created_at,
+                    LAG(actor_id) OVER (ORDER BY id DESC) AS previous_actor_id,
+                    LAG(action) OVER (ORDER BY id DESC) AS previous_action,
+                    LAG(target_id) OVER (ORDER BY id DESC) AS previous_target_id,
+                    LAG(details) OVER (ORDER BY id DESC) AS previous_details
+                FROM mod_audit
+            ),
+            numbered AS (
+                SELECT
+                    *,
+                    SUM(
+                        CASE
+                            WHEN actor_id IS previous_actor_id
+                                AND action IS previous_action
+                                AND target_id IS previous_target_id
+                                AND details IS previous_details
+                            THEN 0 ELSE 1
+                        END
+                    ) OVER (
+                        ORDER BY id DESC
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) AS run_id
+                FROM ordered
+            ),
+            grouped AS (
+                SELECT
+                    MAX(id) AS id,
+                    MAX(actor_id) AS actor_id,
+                    MAX(action) AS action,
+                    MAX(target_id) AS target_id,
+                    MAX(details) AS details,
+                    MAX(created_at) AS created_at,
+                    COUNT(*) AS repeat_count
+                FROM numbered
+                GROUP BY run_id
+            )
+            SELECT
+                actor_id,
+                action,
+                target_id,
+                details,
+                created_at,
+                repeat_count,
+                (SELECT COUNT(*) FROM grouped) AS total_groups
+            FROM grouped
             ORDER BY id DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (limit,),
+            (limit, offset),
         ).fetchall()
 
 
@@ -887,10 +1023,12 @@ def drink_paid(
             (
                 user_id,
                 name,
-                total_liters
+                total_liters,
+                is_member,
+                membership_checked
             )
 
-            VALUES (?, ?, ?)
+            VALUES (?, ?, ?, 1, 1)
 
 
             ON CONFLICT(user_id)
@@ -898,6 +1036,10 @@ def drink_paid(
             DO UPDATE SET
 
             name = excluded.name,
+
+            is_member = 1,
+
+            membership_checked = 1,
 
 
             total_liters =
@@ -1561,12 +1703,15 @@ def add_beer_reward(chat_id: int, user_id: int, name: str, amount: float):
     with get_connection(chat_id) as connection:
         connection.execute(
             """
-            INSERT INTO drinkers (user_id, name, total_liters)
-            VALUES (?, ?, ?)
+            INSERT INTO drinkers
+                (user_id, name, total_liters, is_member, membership_checked)
+            VALUES (?, ?, ?, 1, 1)
             
             ON CONFLICT(user_id)
             DO UPDATE SET
             name = excluded.name,
+            is_member = 1,
+            membership_checked = 1,
             total_liters = ROUND(drinkers.total_liters + excluded.total_liters, 2)
             """,
             (user_id, name, amount)
