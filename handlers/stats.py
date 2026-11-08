@@ -2,6 +2,7 @@ import html
 import logging
 import time
 import asyncio
+from collections import OrderedDict
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramAPIError
@@ -9,7 +10,6 @@ from aiogram.filters import Command
 from aiogram.types import (
     Message,
     CallbackQuery,
-    ChatMemberUpdated,
 )
 from aiogram.utils.keyboard import (
     InlineKeyboardBuilder
@@ -19,9 +19,6 @@ import messages
 from handlers.ephemeral import send_ephemeral_message
 from database import (
     get_leaderboard,
-    get_unchecked_drinker_ids,
-    set_drinker_membership,
-    update_unchecked_drinker_memberships,
     update_user_name,
 )
 from config import (
@@ -36,10 +33,12 @@ router = Router()
 # Подключаем к нему middleware
 router.callback_query.middleware(CooldownMiddleware()) 
 
-MEMBER_RECONCILIATION_BATCH_SIZE = 5
-MEMBER_RECONCILIATION_RETRY_SECONDS = 15 * 60
-membership_reconciliation_tasks: dict[int, asyncio.Task] = {}
-membership_reconciliation_last_started: dict[int, float] = {}
+# Кеширует ответы Telegram на короткое время, чтобы повторные страницы были быстрее.
+MEMBER_STATUS_CACHE_TTL_SECONDS = 60
+MEMBER_STATUS_CACHE_MAX_SIZE = 10_000
+MEMBER_CHECK_BATCH_SIZE = 20
+MEMBER_LOOKAHEAD_BATCH_SIZE = 5
+member_status_cache: OrderedDict[tuple[int, int], tuple[bool, float]] = OrderedDict()
 stats_last_requests: dict[int, float] = {}
 stats_last_warnings: dict[int, float] = {}
 
@@ -89,92 +88,74 @@ def leaderboard_keyboard(chat_id: int, page: int, has_next_page: bool):
     return builder.as_markup()
 
 
-def is_allowed_member(member) -> bool:
-    if member.status not in ALLOWED_STATUSES:
-        return False
-    if member.status == "restricted":
-        return bool(member.is_member)
-    return True
-
-
-@router.chat_member()
-async def update_drinker_membership(event: ChatMemberUpdated):
-    """Keep stored leaderboard membership in sync with Telegram member events."""
-    set_drinker_membership(
-        event.chat.id,
-        event.new_chat_member.user.id,
-        is_allowed_member(event.new_chat_member),
-    )
-
-
-async def reconcile_unchecked_members(bot, chat_id: int):
-    """Reconcile pre-existing drinker rows outside the /stats response path."""
-    try:
-        user_ids = get_unchecked_drinker_ids(chat_id)
-        failed_checks = 0
-        for offset in range(0, len(user_ids), MEMBER_RECONCILIATION_BATCH_SIZE):
-            batch = user_ids[offset:offset + MEMBER_RECONCILIATION_BATCH_SIZE]
-            results = await asyncio.gather(
-                *(bot.get_chat_member(chat_id=chat_id, user_id=user_id) for user_id in batch),
-                return_exceptions=True,
-            )
-
-            memberships = {}
-            for user_id, result in zip(batch, results):
-                if isinstance(result, asyncio.CancelledError):
-                    raise result
-                if isinstance(result, BaseException):
-                    failed_checks += 1
-                    continue
-                memberships[user_id] = is_allowed_member(result)
-
-            update_unchecked_drinker_memberships(chat_id, memberships)
-
-        if failed_checks:
-            logging.warning(
-                "Could not verify %d leaderboard member(s) in chat %s; they will be retried later",
-                failed_checks,
-                chat_id,
-            )
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logging.exception("Could not reconcile leaderboard members for chat %s", chat_id)
-
-
-def schedule_membership_reconciliation(bot, chat_id: int) -> None:
-    """Start one throttled cleanup pass after the leaderboard has been sent."""
-    task = membership_reconciliation_tasks.get(chat_id)
-    if task is not None and not task.done():
-        return
-
-    now = time.monotonic()
-    last_started = membership_reconciliation_last_started.get(chat_id, 0)
-    if now - last_started < MEMBER_RECONCILIATION_RETRY_SECONDS:
-        return
-
-    membership_reconciliation_last_started[chat_id] = now
-    task = asyncio.create_task(reconcile_unchecked_members(bot, chat_id))
-    membership_reconciliation_tasks[chat_id] = task
-    task.add_done_callback(
-        lambda completed: membership_reconciliation_tasks.pop(chat_id, None)
-        if membership_reconciliation_tasks.get(chat_id) is completed
-        else None
-    )
-
-
-def get_valid_leaderboard_text(chat_id: int, target_page: int):
-    """Build a paginated leaderboard from the locally stored active members."""
+async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
+    """Check Telegram membership and build the requested leaderboard page."""
     all_db_rows = get_leaderboard(chat_id)
     if not all_db_rows:
         return messages.EMPTY_LEADERBOARD, None
 
-    total_pages = (len(all_db_rows) + ROWS_PER_PAGE - 1) // ROWS_PER_PAGE
-    page = min(max(0, target_page), total_pages - 1)
+    def get_cached_status(cache_key: tuple[int, int]) -> bool | None:
+        cached = member_status_cache.get(cache_key)
+        if cached is None:
+            return None
+        is_allowed, expires_at = cached
+        if expires_at <= time.monotonic():
+            member_status_cache.pop(cache_key, None)
+            return None
+        member_status_cache.move_to_end(cache_key)
+        return is_allowed
+
+    def cache_status(cache_key: tuple[int, int], is_allowed: bool) -> None:
+        member_status_cache.pop(cache_key, None)
+        if len(member_status_cache) >= MEMBER_STATUS_CACHE_MAX_SIZE:
+            member_status_cache.popitem(last=False)
+        member_status_cache[cache_key] = (
+            is_allowed,
+            time.monotonic() + MEMBER_STATUS_CACHE_TTL_SECONDS,
+        )
+
+    async def check_member(row):
+        cache_key = (chat_id, row["user_id"])
+        cached_status = get_cached_status(cache_key)
+        if cached_status is not None:
+            return row if cached_status else None
+        try:
+            member = await bot.get_chat_member(chat_id=chat_id, user_id=row["user_id"])
+        except Exception:
+            return None
+        is_allowed = member.status in ALLOWED_STATUSES
+        cache_status(cache_key, is_allowed)
+        return row if is_allowed else None
+
+    target_page = max(0, target_page)
+    start_index = target_page * ROWS_PER_PAGE
+    page_end = start_index + ROWS_PER_PAGE
+    valid_rows = []
+    next_offset = 0
+    for offset in range(0, len(all_db_rows), MEMBER_CHECK_BATCH_SIZE):
+        batch = all_db_rows[offset:offset + MEMBER_CHECK_BATCH_SIZE]
+        results = await asyncio.gather(*(check_member(row) for row in batch))
+        valid_rows.extend(row for row in results if row is not None)
+        next_offset = offset + len(batch)
+        if len(valid_rows) >= page_end:
+            break
+
+    lookahead_offset = next_offset if len(valid_rows) == page_end else len(all_db_rows)
+    for offset in range(lookahead_offset, len(all_db_rows), MEMBER_LOOKAHEAD_BATCH_SIZE):
+        batch = all_db_rows[offset:offset + MEMBER_LOOKAHEAD_BATCH_SIZE]
+        results = await asyncio.gather(*(check_member(row) for row in batch))
+        valid_rows.extend(row for row in results if row is not None)
+        if len(valid_rows) > page_end:
+            break
+    if not valid_rows:
+        return messages.EMPTY_LEADERBOARD, None
+
+    page = min(target_page, (len(valid_rows) - 1) // ROWS_PER_PAGE)
     start_index = page * ROWS_PER_PAGE
     end_index = start_index + ROWS_PER_PAGE
-    page_rows = all_db_rows[start_index:end_index]
-    has_next_page = page < total_pages - 1
+    page_rows = valid_rows[start_index:end_index]
+    has_next_page = len(valid_rows) > end_index
+    total_pages = "…" if has_next_page else page + 1
 
     lines = [messages.LEADERBOARD_TITLE.format(page=page + 1, pages=total_pages)]
 
@@ -230,7 +211,7 @@ async def command_stats(message: Message):
         message.from_user.id,
         message.from_user.full_name
     )
-    text, reply_markup = get_valid_leaderboard_text(message.chat.id, 0)
+    text, reply_markup = await get_valid_leaderboard_text(message.bot, message.chat.id, 0)
 
     try:
         await send_ephemeral_message(
@@ -245,7 +226,6 @@ async def command_stats(message: Message):
         logging.exception("Could not send ephemeral /stats response to user %s", message.from_user.id)
         return
 
-    schedule_membership_reconciliation(message.bot, message.chat.id)
 
 
 @router.callback_query(F.data.startswith("beer_top:"))
@@ -288,7 +268,7 @@ async def leaderboard_pagination(callback: CallbackQuery):
         )
 
     # Генерируем запрошенную страницу
-    text, reply_markup = get_valid_leaderboard_text(chat_id, page)
+    text, reply_markup = await get_valid_leaderboard_text(callback.message.bot, chat_id, page)
 
     ephemeral_message_id = getattr(callback.message, "ephemeral_message_id", None)
     if ephemeral_message_id is not None:

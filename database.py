@@ -305,7 +305,7 @@ def get_leaderboard(chat_id: int):
                 name,
                 total_liters
             FROM drinkers
-            WHERE total_liters >= 0.1 AND is_member = 1
+            WHERE total_liters >= 0.1
             ORDER BY
                 total_liters DESC,
                 name COLLATE NOCASE ASC
