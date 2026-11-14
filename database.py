@@ -24,6 +24,14 @@ AUTOFARM_DEFAULT_RANDOM_SPAN_SECONDS = 30 * 60 - 60  # Plugin fallback: random.r
 PATTERN_MIN_INTERVALS = 4
 
 
+class _ClosingConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def database_path(chat_id: int):
     safe_chat_id = re.sub(
         r"[^0-9-]",
@@ -37,7 +45,8 @@ def database_path(chat_id: int):
 def get_connection(chat_id: int):
 
     connection = sqlite3.connect(
-        database_path(chat_id)
+        database_path(chat_id),
+        factory=_ClosingConnection,
     )
 
     connection.row_factory = sqlite3.Row
@@ -303,9 +312,12 @@ def get_leaderboard(chat_id: int):
             SELECT
                 user_id,
                 name,
-                total_liters
+                total_liters,
+                is_member,
+                membership_checked
             FROM drinkers
             WHERE total_liters >= 0.1
+                AND (membership_checked = 0 OR is_member = 1)
             ORDER BY
                 total_liters DESC,
                 name COLLATE NOCASE ASC
@@ -782,7 +794,8 @@ PAID_ATTEMPTS_DATABASE = DATABASE_DIRECTORY / "payd_attemps.sqlite3"
 def get_paid_connection():
 
     connection = sqlite3.connect(
-        PAID_ATTEMPTS_DATABASE
+        PAID_ATTEMPTS_DATABASE,
+        factory=_ClosingConnection,
     )
 
     connection.row_factory = sqlite3.Row
@@ -837,20 +850,19 @@ def create_invoice(
         connection.commit()
 
 
-def get_invoice_status(invoice_id: str):
+def get_invoice_status(invoice_id: str, user_id: int | None = None):
     """Возвращает текущий статус инвойса ('pending', 'paid') или None."""
     with get_paid_connection() as connection:
-
-        row = connection.execute(
-            """
-            SELECT status
-            FROM invoices
-            WHERE id = ?
-            """,
-            (
-                invoice_id,
-            )
-        ).fetchone()
+        if user_id is None:
+            row = connection.execute(
+                "SELECT status FROM invoices WHERE id = ?",
+                (invoice_id,),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                "SELECT status FROM invoices WHERE id = ? AND user_id = ?",
+                (invoice_id, user_id),
+            ).fetchone()
 
         if not row:
             return None
@@ -880,6 +892,37 @@ def mark_invoice_as_paid(invoice_id: str) -> bool:
         connection.commit()
 
         return cursor.rowcount > 0
+
+
+def settle_paid_invoice(invoice_id: str, user_id: int, amount: int) -> int | None:
+    """Atomically mark a pending invoice paid and credit its attempts once."""
+    with get_paid_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        cursor = connection.execute(
+            """
+            UPDATE invoices
+            SET status = 'paid'
+            WHERE id = ? AND user_id = ? AND status = 'pending'
+            """,
+            (invoice_id, user_id),
+        )
+        if cursor.rowcount != 1:
+            return None
+
+        connection.execute(
+            """
+            INSERT INTO paid_attempts (user_id, attempts)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                attempts = paid_attempts.attempts + excluded.attempts
+            """,
+            (user_id, amount),
+        )
+        row = connection.execute(
+            "SELECT attempts FROM paid_attempts WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return int(row["attempts"])
 
 
 def delete_old_pending_invoices():
@@ -1174,7 +1217,7 @@ def _normalize_promo_time_values(time_limited, expires_at, duration):
 
 
 def promo_connect():
-    return sqlite3.connect(PROMO_DB)
+    return sqlite3.connect(PROMO_DB, factory=_ClosingConnection)
 
 
 def create_promo_database():
@@ -1292,27 +1335,6 @@ def get_promo(code):
 
     return result
 
-
-def get_all_promos_page(page=1, limit=10):
-    offset = (page - 1) * limit
-
-    db = promo_connect()
-    cursor = db.cursor()
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM promocodes
-        ORDER BY active ASC, id DESC
-        LIMIT ? OFFSET ?
-        """,
-        (limit, offset)
-    )
-
-    result = cursor.fetchall()
-    db.close()
-
-    return result
 
 def get_active_promos_page(page=1, limit=10):
     offset = (page - 1) * limit
@@ -1502,13 +1524,9 @@ def has_used_promo(promo_id: int, user_id: int) -> bool:
 
 
 def is_expires_at_expired(expires_at: int | str | None) -> bool:
-    if expires_at is None or expires_at == "":
+    timestamp = legacy_datetime_to_timestamp(expires_at)
+    if timestamp is None:
         return False
-    timestamp = (
-        legacy_datetime_to_timestamp(expires_at)
-        if isinstance(expires_at, str) and not expires_at.strip().isdigit()
-        else int(expires_at)
-    )
     return now_timestamp() >= timestamp
 
 
@@ -1520,12 +1538,81 @@ def is_duration_expired(duration: str, created_at: int | str | None) -> bool:
     if seconds is None:
         return False
 
-    created_timestamp = (
-        legacy_datetime_to_timestamp(created_at)
-        if isinstance(created_at, str) and not created_at.strip().isdigit()
-        else int(created_at)
-    )
+    created_timestamp = legacy_datetime_to_timestamp(created_at)
+    if created_timestamp is None:
+        return False
     return now_timestamp() >= created_timestamp + seconds
+
+
+def claim_promo(promo_id: int, user_id: int) -> bool:
+    """Atomically enforce per-user and total activation limits."""
+    connection = promo_connect()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        promo = connection.execute(
+            """
+            SELECT active, activation_limited, max_activations, used_count, bind_users,
+                   time_limited, expires_at, duration, created_at
+            FROM promocodes
+            WHERE id = ?
+            """,
+            (promo_id,),
+        ).fetchone()
+        if promo is None or not promo[0]:
+            return False
+
+        if promo[4]:
+            allowed_users = {int(value.strip()) for value in promo[4].split(",") if value.strip()}
+            if user_id not in allowed_users:
+                return False
+
+        if promo[5] and (
+            (promo[6] and is_expires_at_expired(promo[6]))
+            or (promo[7] and is_duration_expired(promo[7], promo[8]))
+        ):
+            connection.execute("UPDATE promocodes SET active = 0 WHERE id = ?", (promo_id,))
+            connection.commit()
+            return False
+
+        if promo[1] and promo[2] is not None and promo[3] >= promo[2]:
+            return False
+
+        if connection.execute(
+            "SELECT 1 FROM promo_uses WHERE promo_id = ? AND user_id = ?",
+            (promo_id, user_id),
+        ).fetchone():
+            return False
+
+        connection.execute(
+            "INSERT INTO promo_uses (promo_id, user_id, used_at) VALUES (?, ?, ?)",
+            (promo_id, user_id, now_timestamp()),
+        )
+        updated_count = promo[3] + 1
+        connection.execute(
+            "UPDATE promocodes SET used_count = ? WHERE id = ?",
+            (updated_count, promo_id),
+        )
+
+        should_deactivate = bool(promo[1] and promo[2] is not None and updated_count >= promo[2])
+        if promo[4] and not should_deactivate:
+            bound_users = [int(value.strip()) for value in promo[4].split(",") if value.strip()]
+            if bound_users:
+                placeholders = ",".join("?" for _ in bound_users)
+                used_count = connection.execute(
+                    f"SELECT COUNT(DISTINCT user_id) FROM promo_uses WHERE promo_id = ? AND user_id IN ({placeholders})",
+                    (promo_id, *bound_users),
+                ).fetchone()[0]
+                should_deactivate = used_count == len(set(bound_users))
+
+        if should_deactivate:
+            connection.execute("UPDATE promocodes SET active = 0 WHERE id = ?", (promo_id,))
+        connection.commit()
+        return True
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def use_promo(promo_id: int, user_id: int):

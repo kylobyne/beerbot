@@ -2,7 +2,6 @@ import html
 import logging
 import time
 import asyncio
-from collections import OrderedDict
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramAPIError
@@ -20,6 +19,7 @@ from handlers.ephemeral import send_ephemeral_message
 from database import (
     get_leaderboard,
     update_user_name,
+    update_unchecked_drinker_memberships,
 )
 from config import (
     ROWS_PER_PAGE,
@@ -33,12 +33,8 @@ router = Router()
 # Подключаем к нему middleware
 router.callback_query.middleware(CooldownMiddleware()) 
 
-# Кеширует ответы Telegram на короткое время, чтобы повторные страницы были быстрее.
-MEMBER_STATUS_CACHE_TTL_SECONDS = 60
-MEMBER_STATUS_CACHE_MAX_SIZE = 10_000
 MEMBER_CHECK_BATCH_SIZE = 20
 MEMBER_LOOKAHEAD_BATCH_SIZE = 5
-member_status_cache: OrderedDict[tuple[int, int], tuple[bool, float]] = OrderedDict()
 stats_last_requests: dict[int, float] = {}
 stats_last_warnings: dict[int, float] = {}
 
@@ -89,43 +85,41 @@ def leaderboard_keyboard(chat_id: int, page: int, has_next_page: bool):
 
 
 async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
-    """Check Telegram membership and build the requested leaderboard page."""
+    """Reconcile legacy membership rows, then render the requested page."""
     all_db_rows = get_leaderboard(chat_id)
     if not all_db_rows:
         return messages.EMPTY_LEADERBOARD, None
 
-    def get_cached_status(cache_key: tuple[int, int]) -> bool | None:
-        cached = member_status_cache.get(cache_key)
-        if cached is None:
-            return None
-        is_allowed, expires_at = cached
-        if expires_at <= time.monotonic():
-            member_status_cache.pop(cache_key, None)
-            return None
-        member_status_cache.move_to_end(cache_key)
-        return is_allowed
-
-    def cache_status(cache_key: tuple[int, int], is_allowed: bool) -> None:
-        member_status_cache.pop(cache_key, None)
-        if len(member_status_cache) >= MEMBER_STATUS_CACHE_MAX_SIZE:
-            member_status_cache.popitem(last=False)
-        member_status_cache[cache_key] = (
-            is_allowed,
-            time.monotonic() + MEMBER_STATUS_CACHE_TTL_SECONDS,
-        )
-
     async def check_member(row):
-        cache_key = (chat_id, row["user_id"])
-        cached_status = get_cached_status(cache_key)
-        if cached_status is not None:
-            return row if cached_status else None
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=row["user_id"])
-        except Exception:
-            return None
-        is_allowed = member.status in ALLOWED_STATUSES
-        cache_status(cache_key, is_allowed)
-        return row if is_allowed else None
+        except TelegramAPIError:
+            return row["user_id"], None
+        return row["user_id"], member.status in ALLOWED_STATUSES
+
+    async def reconcile_batch(batch):
+        unchecked_rows = [row for row in batch if not row["membership_checked"]]
+        if not unchecked_rows:
+            return [row for row in batch if row["is_member"]]
+
+        checked = await asyncio.gather(*(check_member(row) for row in unchecked_rows))
+        membership_updates = {
+            user_id: is_member
+            for user_id, is_member in checked
+            if is_member is not None
+        }
+        update_unchecked_drinker_memberships(chat_id, membership_updates)
+
+        is_member_by_id = dict(checked)
+        return [
+            row
+            for row in batch
+            if (
+                bool(row["is_member"])
+                if row["membership_checked"]
+                else is_member_by_id.get(row["user_id"]) is True
+            )
+        ]
 
     target_page = max(0, target_page)
     start_index = target_page * ROWS_PER_PAGE
@@ -134,8 +128,7 @@ async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
     next_offset = 0
     for offset in range(0, len(all_db_rows), MEMBER_CHECK_BATCH_SIZE):
         batch = all_db_rows[offset:offset + MEMBER_CHECK_BATCH_SIZE]
-        results = await asyncio.gather(*(check_member(row) for row in batch))
-        valid_rows.extend(row for row in results if row is not None)
+        valid_rows.extend(await reconcile_batch(batch))
         next_offset = offset + len(batch)
         if len(valid_rows) >= page_end:
             break
@@ -143,8 +136,7 @@ async def get_valid_leaderboard_text(bot, chat_id: int, target_page: int):
     lookahead_offset = next_offset if len(valid_rows) == page_end else len(all_db_rows)
     for offset in range(lookahead_offset, len(all_db_rows), MEMBER_LOOKAHEAD_BATCH_SIZE):
         batch = all_db_rows[offset:offset + MEMBER_LOOKAHEAD_BATCH_SIZE]
-        results = await asyncio.gather(*(check_member(row) for row in batch))
-        valid_rows.extend(row for row in results if row is not None)
+        valid_rows.extend(await reconcile_batch(batch))
         if len(valid_rows) > page_end:
             break
     if not valid_rows:

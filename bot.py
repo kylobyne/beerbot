@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeDefault
 
 # ДОБАВЛЕНО: Импортируем интервал очистки из конфигурации
@@ -73,6 +74,30 @@ async def configure_group_commands(bot: Bot):
     await bot.set_my_commands(commands, scope=group_scope)
 
 
+async def run_polling_with_retry(bot: Bot, dp: Dispatcher) -> None:
+    retry_delay = 1
+    while True:
+        try:
+            await bot.delete_webhook(drop_pending_updates=False)
+            await dp.start_polling(
+                bot,
+                allowed_updates=dp.resolve_used_update_types(),
+                close_bot_session=False,
+            )
+            return
+        except TelegramNetworkError:
+            logging.exception("Telegram API unavailable; retrying polling in %s seconds", retry_delay)
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
+
+
+async def _cancel_background_tasks(tasks: list[asyncio.Task]) -> None:
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def main():
 
     logging.basicConfig(
@@ -87,10 +112,12 @@ async def main():
 
     bot = Bot(TOKEN)
     dp = Dispatcher()
-    await configure_group_commands(bot)
+    try:
+        await configure_group_commands(bot)
+    except TelegramAPIError:
+        logging.exception("Could not update Telegram commands; continuing with long polling")
 
     # ШАГ 2: Регистрируем админский роутер в диспетчере первым
-   
     dp.include_router(start.router)
     dp.include_router(beer.router)
     dp.include_router(buy.router)
@@ -99,15 +126,15 @@ async def main():
     dp.include_router(mod.router)
     dp.include_router(admin.router)
 
-    # Запускаем фоновую задачу
-    asyncio.create_task(periodic_db_cleaner())
+    background_tasks = [asyncio.create_task(periodic_db_cleaner())]
     if SQLITE_AUTOBACKUP_ENABLED:
-        asyncio.create_task(periodic_sqlite_backup())
+        background_tasks.append(asyncio.create_task(periodic_sqlite_backup()))
 
-    await dp.start_polling(
-        bot,
-        allowed_updates=dp.resolve_used_update_types(),
-    )
+    try:
+        await run_polling_with_retry(bot, dp)
+    finally:
+        await _cancel_background_tasks(background_tasks)
+        await bot.session.close()
 
 
 if __name__ == "__main__":

@@ -10,11 +10,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import BUY_OPTIONS, INVOICE_LIFETIME # Здесь COOLDOWN_TIME больше не нужен, он внутри Middleware.py
 from database import (
-    add_paid_attempts, 
-    get_paid_attempts, 
     create_invoice, 
     get_invoice_status, 
-    mark_invoice_as_paid
+    settle_paid_invoice,
 )
 import messages
 # Импортируем ваш созданный класс из соседнего файла Middleware.py
@@ -118,7 +116,7 @@ async def process_pre_checkout(query: PreCheckoutQuery):
             return
 
         # Проверка 2: Проверяем актуальный статус инвойса в базе данных
-        status = get_invoice_status(invoice_id)
+        status = get_invoice_status(invoice_id, user_id=query.from_user.id)
         if status == "paid":
             await query.answer(ok=False, error_message="Этот счет уже был успешно оплачен.")
             return
@@ -150,12 +148,13 @@ async def successful_payment(message: Message):
     # Защита от дубликатов (Идемпотентность):
     # Метод переведет статус в 'paid' только если он до этого был 'pending'.
     # Если вернулось False — значит этот инвойс уже обработан ранее, выходим.
-    if not mark_invoice_as_paid(invoice_id):
+    total_attempts = settle_paid_invoice(
+        invoice_id,
+        user_id=message.from_user.id,
+        amount=attempts,
+    )
+    if total_attempts is None:
         return
-
-    # Запись начисления в БД
-    add_paid_attempts(message.from_user.id, attempts)
-    total_attempts = get_paid_attempts(message.from_user.id)
 
     name = message.from_user.full_name
 

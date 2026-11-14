@@ -110,7 +110,7 @@
     <li>топ-3 с медальками 🥇🥈🥉.</li>
 </ul>
 
-<p>При построении рейтинга участники проверяются через Telegram и покинувшие чат пользователи не отображаются. Статусы проверки кешируются на 60 секунд. Если Telegram не отвечает на проверку участника, он пропускается в текущем выводе.</p>
+<p>Статус участника сохраняется в базе чата. При первом открытии старые записи сверяются с Telegram параллельно пакетами; результат сохраняется. Дальше проверенные участники не требуют сетевого запроса при каждом открытии или перелистывании страницы. События вступления и выхода обновляют кэш автоматически. Если Telegram недоступен при первой сверке, неизвестная запись временно не показывается и может быть проверена при следующем открытии.</p>
 <p>Повторный вызов <code>/stats</code> в одном чате ограничен интервалом <code>STATS_COOLDOWN_SECONDS</code> из <code>config.py</code>; предупреждение отправляется не чаще этого интервала.</p>
 
 <hr>
@@ -226,6 +226,9 @@
 ├── config.py                 # Все настройки
 ├── database.py               # Работа с SQLite3
 ├── messages.py               # Все текстовые сообщения
+├── services/
+│   ├── beer.py               # Правила /beer и выбор бесплатной/платной попытки
+│   └── promos.py             # Проверки и применение промокодов
 │
 ├── handlers/
 │   ├── admin.py              # Админ-панель
@@ -238,6 +241,7 @@
 │   ├── start.py              # Команда /start
 │   └── stats.py              # Команда /stats
 │
+├── tests/                    # Регрессионные unittest
 ├── sqlite3/
 │   ├── chat_&lt;id&gt;.sqlite3     # Базы отдельных чатов
 │   ├── payd_attemps.sqlite3  # Общая база платных попыток
@@ -247,6 +251,7 @@
 │
 ├── .venv/                    # Виртуальное окружение
 ├── .env                      # Переменные окружения
+├── .dockerignore             # Исключает секреты и базы из build context
 ├── requirements.txt          # Зависимости
 └── README.md</code></pre>
 
@@ -264,7 +269,9 @@
     user_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     total_liters REAL NOT NULL DEFAULT 0,
-    last_drink INTEGER NOT NULL DEFAULT 0
+    last_drink INTEGER NOT NULL DEFAULT 0,
+    is_member INTEGER NOT NULL DEFAULT 1,
+    membership_checked INTEGER NOT NULL DEFAULT 0
 );</code></pre>
 
 <p><strong>Поля:</strong></p>
@@ -273,6 +280,7 @@
     <li><code>name</code> - Имя пользователя</li>
     <li><code>total_liters</code> - Всего выпито литров</li>
     <li><code>last_drink</code> - Время последнего выпивания (timestamp)</li>
+    <li><code>is_member</code> и <code>membership_checked</code> - статус участника для быстрого и актуального рейтинга</li>
 </ul>
 
 <hr>
@@ -315,15 +323,15 @@ CREATE TABLE invoices (
     reward_type TEXT,
     reward_amount INTEGER DEFAULT 0,
     time_limited INTEGER DEFAULT 0,
-    expires_at TEXT,
+    expires_at INTEGER,
     duration TEXT,
     activation_limited INTEGER DEFAULT 0,
     max_activations INTEGER,
     used_count INTEGER DEFAULT 0,
     bind_users TEXT,
     created_by INTEGER,
-    created_at TEXT,
-    updated_at TEXT,
+    created_at INTEGER,
+    updated_at INTEGER,
     active INTEGER DEFAULT 1
 );
 
@@ -331,8 +339,10 @@ CREATE TABLE promo_uses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     promo_id INTEGER,
     user_id INTEGER,
-    used_at TEXT
+    used_at INTEGER
 );</code></pre>
+
+<p>При запуске миграция приводит legacy text timestamps к Unix timestamps и добавляет недостающие поля текущих таблиц. Существующие записи сохраняются; удалять SQLite-файлы для обновления нельзя.</p>
 
 <hr>
 
@@ -363,9 +373,14 @@ source .venv/bin/activate</code></pre>
 <pre><code>BOT_TOKEN=ваш_токен_бота
 SQLITE_AUTOBACKUP_ENABLED=false</code></pre>
 
+<p>Запуск использует long polling через Telegram Bot API. Настройки webhook и публичные порты для работы бота не нужны.</p>
+
 <h3>5. Запуск бота</h3>
 
 <pre><code>python bot.py</code></pre>
+
+<p>Запуск тестов:</p>
+<pre><code>python -m unittest discover -s tests -v</code></pre>
 
 <hr>
 

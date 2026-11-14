@@ -11,7 +11,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import MOD_ADMINS_PAGE_SIZE, MOD_AUDIT_PAGE_SIZE, MOD_HISTORY_PAGE_SIZE
+from config import ALLOWED_STATUSES, MOD_ADMINS_PAGE_SIZE, MOD_AUDIT_PAGE_SIZE, MOD_HISTORY_PAGE_SIZE
 import database
 from handlers.ephemeral import send_ephemeral_message
 import messages
@@ -54,8 +54,14 @@ async def is_owner(bot, chat_id: int, user_id: int) -> bool:
 
 
 @router.chat_member()
-async def clear_permissions_after_demotion(event: ChatMemberUpdated):
+async def handle_chat_member_update(event: ChatMemberUpdated):
     target_id = event.new_chat_member.user.id
+    database.set_drinker_membership(
+        event.chat.id,
+        target_id,
+        event.new_chat_member.status in ALLOWED_STATUSES,
+    )
+
     if event.new_chat_member.status in ADMIN_STATUSES:
         return
 
