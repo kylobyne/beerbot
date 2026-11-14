@@ -35,8 +35,8 @@ router.callback_query.middleware(CooldownMiddleware())
 
 MEMBER_CHECK_BATCH_SIZE = 20
 MEMBER_LOOKAHEAD_BATCH_SIZE = 5
-stats_last_requests: dict[int, float] = {}
-stats_last_warnings: dict[int, float] = {}
+stats_last_requests: dict[tuple[int, int], float] = {}
+stats_last_warnings: dict[tuple[int, int], float] = {}
 
 
 def format_liters(value: float):
@@ -176,11 +176,12 @@ async def command_stats(message: Message):
         return
 
     now = time.monotonic()
-    last_request = stats_last_requests.get(message.chat.id)
+    request_key = (message.chat.id, message.from_user.id)
+    last_request = stats_last_requests.get(request_key)
     if last_request is not None and now - last_request < STATS_COOLDOWN_SECONDS:
-        last_warning = stats_last_warnings.get(message.chat.id)
+        last_warning = stats_last_warnings.get(request_key)
         if last_warning is None or now - last_warning >= STATS_COOLDOWN_SECONDS:
-            stats_last_warnings[message.chat.id] = now
+            stats_last_warnings[request_key] = now
             try:
                 await send_ephemeral_message(
                     bot=message.bot,
@@ -196,7 +197,7 @@ async def command_stats(message: Message):
                 )
         return
 
-    stats_last_requests[message.chat.id] = now
+    stats_last_requests[request_key] = now
 
     update_user_name(
         message.chat.id,
